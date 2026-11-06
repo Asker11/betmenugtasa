@@ -48,14 +48,10 @@ jobs:
       - name: plugin_sa kütüphanesini derle (Release)
         shell: pwsh
         run: |
-          $sln = Get-ChildItem $env:PLUGIN_SDK_DIR -Filter plugin.sln -Recurse | Select-Object -First 1
-          if (-not $sln) { throw "plugin.sln bulunamadi" }
-          msbuild $sln.FullName /m /t:plugin_sa /p:Configuration=Release /p:Platform=Win32
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Cozumdeki projeler:"
-            Select-String -Path $sln.FullName -Pattern '^Project\('
-            throw "plugin_sa derlenemedi"
-          }
+          $proj = Join-Path $env:PLUGIN_SDK_DIR 'plugin_sa\Plugin_SA.vcxproj'
+          if (-not (Test-Path $proj)) { throw "Plugin_SA.vcxproj bulunamadi: $proj" }
+          msbuild $proj /m /p:Configuration=Release /p:Platform=Win32
+          if ($LASTEXITCODE -ne 0) { throw "Plugin_SA derlenemedi (yukaridaki 'error' satirlarina bak)" }
 
       - name: BetaMenu.asi derle
         shell: pwsh
