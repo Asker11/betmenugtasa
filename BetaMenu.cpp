@@ -28,18 +28,24 @@ using namespace plugin;
 // ---------------------------------------------------------------- ayarlar
 struct Config {
     bool  enabled                = true;
-    bool  hideOriginalBackground = true;
+    // DİKKAT: true yapılırsa oyun yazıları/başlığı bozuk çiziyor (test edildi). Varsayılan kapalı.
+    bool  hideOriginalBackground = false;
     bool  ornament               = true;
+    bool  log                    = false;   // tanı logu (BetaMenu.log)
 
-    // Kutu, panelin (m_vPosn) konumuna göre; hepsi 640x448 sanal koordinat
-    float offsetX = -4.0f;
-    float offsetY = -8.0f;
-    float extraW  = 22.0f;   // sütun genişlikleri toplamına eklenir
-    float extraH  = 16.0f;   // satır yüksekliklerine eklenir
+    // Kutu, panelin (m_vPosn) konumuna göre; hepsi 640x448 sanal koordinat.
+    // Orijinal panel ölçüsü (1920x1080 ekran görüntüsünden ölçüldü):
+    //   sol kenar = posX, üst kenar = posY, genişlik = sütun toplamı + 44 px,
+    //   yükseklik = 120 px + 35 px * (satır + başlık satırı)  ->  ~49.8 + 14.5*(satır+başlık) sanal birim.
+    // Başlık ("Tattoo") panelin üst kenarına taşıyor (posY-32 .. posY+22 px); kutu bunu içine alır.
+    float offsetX = -4.7f;
+    float offsetY = -18.0f;
+    float extraW  = 24.0f;   // sütun genişlikleri toplamına eklenir
+    float extraH  = 14.0f;   // alt pay
 
-    float titleH  = 23.0f;   // panel üstünden ilk satıra kadar boşluk (başlık alanı)
-    float headerH = 14.0f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
-    float rowH    = 14.4f;   // satır aralığı (ekran görüntüsünden ölçüldü)
+    float titleH  = 60.0f;   // kutu üstünden ilk satıra kadar olan sabit alan (başlık dahil)
+    float headerH = 14.5f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
+    float rowH    = 14.5f;   // satır aralığı
 
     int   alpha    = 215;    // kutu şeffaflığı (0-255)
     float frame    = 2.0f;   // beyaz çerçeve kalınlığı
@@ -77,6 +83,7 @@ static void LoadConfig() {
     g_cfg.enabled                = ReadB("Enabled", d.enabled, ini);
     g_cfg.hideOriginalBackground = ReadB("HideOriginalBackground", d.hideOriginalBackground, ini);
     g_cfg.ornament               = ReadB("Ornament", d.ornament, ini);
+    g_cfg.log                    = ReadB("Log", d.log, ini);
     g_cfg.offsetX  = ReadF("OffsetX", d.offsetX, ini);
     g_cfg.offsetY  = ReadF("OffsetY", d.offsetY, ini);
     g_cfg.extraW   = ReadF("ExtraWidth", d.extraW, ini);
@@ -214,21 +221,18 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
                          + p->m_nNumRows * g_cfg.rowH + g_cfg.extraH;
     const float b = t + contentH * sy;
 
-    LogPanel(panelId, p, sx, sy, width, l, t, r, b);
+    if (g_cfg.log)
+        LogPanel(panelId, p, sx, sy, width, l, t, r, b);
 
     const CRGBA black(0, 0, 0, (unsigned char)g_cfg.alpha);
     const CRGBA white(255, 255, 255, 255);
 
-    // siyah kutu
+    // 1) Siyah kutu: orijinal panelin ALTINA çizilir. Kutu orijinal panelin tamamını kapsadığı için
+    //    orijinalin yarı saydam paneli üstüne binince kenarları taşmaz.
     Rect(l, t, r, b, black);
-    // beyaz çerçeve (kutunun hemen içinde)
-    float gap = g_cfg.frameGap * sx;
-    FrameRect(l + gap, t + gap * (sy / sx), r - gap, b - gap * (sy / sx), g_cfg.frame * sy, white);
-    // alt süs
-    if (g_cfg.ornament)
-        DrawOrnament(l, r, b + 3.0f * sy, sx, sy, white);
 
-    // yazılar / fiyatlar / seçim vurgusu: orijinal kod
+    // 2) Orijinal kod: panel, "Tattoo" başlığı, yazılar, fiyatlar, seçim vurgusu.
+    //    m_bColumnBackground'a DOKUNMUYORUZ (kapatınca yazılar bozuluyordu).
     bool oldBg = p->m_bColumnBackground;
     if (g_cfg.hideOriginalBackground)
         p->m_bColumnBackground = false;
@@ -236,6 +240,13 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     g_origDisplay(panelId, brightFont);
 
     p->m_bColumnBackground = oldBg;
+
+    // 3) Beyaz çerçeve ve alt süs: orijinal panelin ÜSTÜNE çizilir ki gri panel onları soldurmasın.
+    //    (İnce şeritler, yazıların üstüne taşmaz.)
+    float gap = g_cfg.frameGap * sx;
+    FrameRect(l + gap, t + gap * (sy / sx), r - gap, b - gap * (sy / sx), g_cfg.frame * sy, white);
+    if (g_cfg.ornament)
+        DrawOrnament(l, r, b + 3.0f * sy, sx, sy, white);
 }
 
 static void InstallHook() {
