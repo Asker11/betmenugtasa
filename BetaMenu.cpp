@@ -53,11 +53,16 @@ struct Config {
     int   alpha    = 0;
     float frame    = 2.0f;   // beyaz çerçeve kalınlığı
     float frameGap = 0.0f;   // kutu ile çerçeve arası boşluk (çerçeve kutunun DIŞINDA çizilir)
-    float outline  = 1.5f;   // beyaz çerçevenin dışındaki siyah kontur kalınlığı (sanal birim)
+    float outline  = 2.0f;   // beyaz çerçevenin dışındaki siyah kontur kalınlığı (sanal birim)
 
-    float ornH     = 28.0f;  // süsün yüksekliği (sanal birim); genişlik orandan otomatik hesaplanır
-    float ornX     = 0.0f;   // süsü kenarlardan DIŞARI kaydır (+ dışarı, - içeri)
-    float ornY     = 0.0f;   // süsü aşağı kaydır (+ aşağı, - yukarı)
+    // Süs ölçüleri beta ekran görüntüsünden ölçüldü: yükseklik ~30, yarım parça genişliği ~96,
+    // kenarlardan dışarı taşma ~11 sanal birim. Görselin oranı beta'dan daha "yüksek" olduğu için
+    // yatayda biraz gerilir (ornStretchX).
+    float ornH       = 34.0f;  // süsün yüksekliği (sanal birim)
+    float ornStretchX = 1.3f;  // yatay germe çarpanı (1 = görselin kendi oranı)
+    float ornX       = 11.0f;  // süsü kenarlardan DIŞARI kaydır (+ dışarı, - içeri)
+    float ornY       = 0.0f;   // süsü aşağı kaydır (+ aşağı, - yukarı)
+    float ornOutline = 1.0f;   // süsün etrafına eklenen ekstra siyah kontur (sanal birim, 0 = yok)
 };
 static Config g_cfg;
 
@@ -102,8 +107,10 @@ static void LoadConfig() {
     g_cfg.frameGap = ReadF("FrameGap", d.frameGap, ini);
     g_cfg.outline  = ReadF("OutlineThickness", d.outline, ini);
     g_cfg.ornH     = ReadF("OrnamentHeight", d.ornH, ini);
+    g_cfg.ornStretchX = ReadF("OrnamentStretchX", d.ornStretchX, ini);
     g_cfg.ornX     = ReadF("OrnamentOffsetX", d.ornX, ini);
     g_cfg.ornY     = ReadF("OrnamentOffsetY", d.ornY, ini);
+    g_cfg.ornOutline = ReadF("OrnamentOutline", d.ornOutline, ini);
 }
 
 // ---------------------------------------------------------------- çizim yardımcıları
@@ -195,9 +202,11 @@ static bool DrawOrnamentTextured(float fl, float fr, float cy, float sx, float s
     if (!g_ornL || !g_ornR) return false;
 
     float h = g_cfg.ornH * sy;
-    float w = h / kOrnHalfAspect;                // yarım parçanın piksel genişliği (oran korunur)
-    const float avail = (fr - fl) * 0.98f;       // dar menülerde iki parça çakışmasın
-    if (2.0f * w > avail) { const float k = avail / (2.0f * w); w *= k; h *= k; }
+    float w = h / kOrnHalfAspect * g_cfg.ornStretchX;   // yarım parçanın piksel genişliği
+    // Dar menülerde (2 sütunlu paneller) iki parça çakışmasın: aralarında en az %16 boşluk kalsın
+    // (beta'da boşluk toplam genişliğin ~%15.5'i). Taşma payı da genişliğe dahildir.
+    const float span = (fr - fl) + 2.0f * g_cfg.ornX * sx;
+    if (2.0f * w > span * 0.84f) { const float k = span * 0.84f / (2.0f * w); w *= k; h *= k; }
 
     const float top = cy - kOrnLineV * h + g_cfg.ornY * sy;
     const float bot = top + h;
@@ -207,6 +216,19 @@ static bool DrawOrnamentTextured(float fl, float fr, float cy, float sx, float s
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATESRCBLEND,  (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+
+    // Ekstra siyah kontur: sprite siyaha boyanıp 8 yöne kaydırılarak çizilir (doku değişmez).
+    const float oo = g_cfg.ornOutline * sy;
+    if (oo > 0.0f) {
+        static const float dx[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        static const float dy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        const CRGBA blk(0, 0, 0, 255);
+        for (int i = 0; i < 8; ++i) {
+            const float ox = dx[i] * oo, oy = dy[i] * oo;
+            g_ornL->Draw(CRect(lx + ox,     bot + oy, lx + w + ox, top + oy), blk);
+            g_ornR->Draw(CRect(rx - w + ox, bot + oy, rx + ox,     top + oy), blk);
+        }
+    }
 
     g_ornL->Draw(CRect(lx,     bot, lx + w, top), white);   // CRect: (sol, alt, sağ, üst)
     g_ornR->Draw(CRect(rx - w, bot, rx,     top), white);
