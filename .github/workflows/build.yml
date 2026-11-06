@@ -74,7 +74,7 @@ jobs:
           $srcs = @('BetaMenu.cpp',
                     'minhook\src\buffer.c','minhook\src\hook.c','minhook\src\trampoline.c','minhook\src\hde\hde32.c')
 
-          $args = @('/nologo','/LD','/MT','/O2','/std:c++17','/EHsc','/utf-8',
+          $args = @('/nologo','/LD','/MT','/O2','/std:c++latest','/EHsc','/utf-8',
                     '/DGTASA','/DPLUGIN_SGV_10US','/DRW','/D_DX9_SDK_INSTALLED','/D_CRT_SECURE_NO_WARNINGS',
                     "/Iminhook\include") + $inc + $srcs +
                   @('/Fe:BetaMenu.asi','/link',$lib.FullName,'user32.lib','kernel32.lib','winmm.lib')
