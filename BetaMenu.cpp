@@ -31,14 +31,14 @@ struct Config {
     bool  ornament               = true;
 
     // Kutu, panelin (m_vPosn) konumuna göre; hepsi 640x448 sanal koordinat
-    float offsetX = -6.0f;
+    float offsetX = -4.0f;
     float offsetY = -8.0f;
     float extraW  = 12.0f;   // sütun genişlikleri toplamına eklenir
-    float extraH  = 14.0f;   // satır yüksekliklerine eklenir
+    float extraH  = 16.0f;   // satır yüksekliklerine eklenir
 
-    float titleH  = 30.0f;   // başlık ("Tattoo") alanı
-    float headerH = 18.0f;   // sütun başlığı ("Tattoo / Cost")
-    float rowH    = 14.8f;   // satır aralığı
+    float titleH  = 23.0f;   // panel üstünden ilk satıra kadar boşluk (başlık alanı)
+    float headerH = 14.0f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
+    float rowH    = 14.4f;   // satır aralığı (ekran görüntüsünden ölçüldü)
 
     int   alpha    = 215;    // kutu şeffaflığı (0-255)
     float frame    = 2.0f;   // beyaz çerçeve kalınlığı
@@ -174,14 +174,22 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     const float sx = (float)RsGlobal.maximumWidth  / 640.0f;
     const float sy = (float)RsGlobal.maximumHeight / 448.0f;
 
+    // NOT: m_vPosn ve m_afColumnWidth oyun tarafından ZATEN ekran pikseline çevrilmiş halde saklanıyor
+    // (örn. posX=87 = 29*3). Bu yüzden onları tekrar sx/sy ile çarpmıyoruz; sadece ini'deki
+    // sanal (640x448) ayarlar sx/sy ile piksele çevrilir.
     float width = 0.0f;
-    for (int c = 0; c < p->m_nNumColumns && c < 4; ++c)
+    bool  hasHeader = false;
+    for (int c = 0; c < p->m_nNumColumns && c < 4; ++c) {
         width += p->m_afColumnWidth[c];
+        if (p->m_aacColumnHeaders[c][0] != '\0') hasHeader = true;
+    }
 
-    const float l = (p->m_vPosn.x + g_cfg.offsetX) * sx;
-    const float t = (p->m_vPosn.y + g_cfg.offsetY) * sy;
-    const float r = l + (width + g_cfg.extraW) * sx;
-    const float b = t + (g_cfg.titleH + g_cfg.headerH + p->m_nNumRows * g_cfg.rowH + g_cfg.extraH) * sy;
+    const float l = p->m_vPosn.x + g_cfg.offsetX * sx;
+    const float t = p->m_vPosn.y + g_cfg.offsetY * sy;
+    const float r = l + width + g_cfg.extraW * sx;
+    const float contentH = g_cfg.titleH + (hasHeader ? g_cfg.headerH : 0.0f)
+                         + p->m_nNumRows * g_cfg.rowH + g_cfg.extraH;
+    const float b = t + contentH * sy;
 
     LogPanel(panelId, p, sx, sy, width, l, t, r, b);
 
