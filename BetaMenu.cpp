@@ -33,23 +33,22 @@ struct Config {
     bool  ornament               = true;
     bool  log                    = false;   // tanı logu (BetaMenu.log)
 
-    // Kutu, panelin (m_vPosn) konumuna göre; hepsi 640x448 sanal koordinat.
-    // Orijinal panel ölçüsü (1920x1080 ekran görüntüsünden ölçüldü):
-    //   sol kenar = posX, üst kenar = posY, genişlik = sütun toplamı + 44 px,
-    //   yükseklik = 120 px + 35 px * (satır + başlık satırı)  ->  ~49.8 + 14.5*(satır+başlık) sanal birim.
-    // Başlık ("Tattoo") panelin üst kenarına taşıyor (posY-32 .. posY+22 px); kutu bunu içine alır.
-    float offsetX = -4.7f;
-    float offsetY = -18.0f;
-    float extraW  = 24.0f;   // sütun genişlikleri toplamına eklenir
-    float extraH  = 14.0f;   // alt pay
+    // Kutu, orijinal panelle AYNI ölçüde. Orijinal panel (1920x1080 ekran görüntüsünden ölçüldü):
+    //   sol kenar = posX, üst kenar = posY, genişlik = sütun toplamı + 44 px (=14.67 sanal),
+    //   yükseklik = 120 px + 35 px * (satır + başlık satırı)  (= 49.78 + 14.52*(satır+başlık) sanal).
+    // Değerler 640x448 sanal birim; oyun çözünürlüğe göre ölçekler.
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
+    float extraW  = 14.67f;  // sütun genişlikleri toplamına eklenir
+    float extraH  = 0.0f;    // alt pay
 
-    float titleH  = 60.0f;   // kutu üstünden ilk satıra kadar olan sabit alan (başlık dahil)
-    float headerH = 14.5f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
-    float rowH    = 14.5f;   // satır aralığı
+    float titleH  = 49.78f;  // panel üstünden ilk satıra kadar olan sabit yükseklik
+    float headerH = 14.52f;  // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
+    float rowH    = 14.52f;  // satır aralığı
 
     int   alpha    = 215;    // kutu şeffaflığı (0-255)
     float frame    = 2.0f;   // beyaz çerçeve kalınlığı
-    float frameGap = 2.0f;   // kutu ile çerçeve arası boşluk
+    float frameGap = 0.0f;   // kutu ile çerçeve arası boşluk (çerçeve kutunun DIŞINDA çizilir)
 
     float ornH     = 22.0f;  // ornament bandının yüksekliği
 };
@@ -112,8 +111,8 @@ static void FrameRect(float l, float t, float r, float b, float th, const CRGBA&
 
 // Beta ekran görüntüsündeki alt süs: ortada ince çizgi, iki uçta kıvrım benzeri yığılmış bloklar,
 // ortada küçük elmas. Gerçek doku yerine DrawRect ile çizilir.
-static void DrawOrnament(float l, float r, float top, float sx, float sy, const CRGBA& c) {
-    float cy = top + (g_cfg.ornH * 0.5f) * sy;
+// cy = süsün dikey ortası (alt çerçeve çizgisinin ortasına verilir).
+static void DrawOrnament(float l, float r, float cy, float sx, float sy, const CRGBA& c) {
     float cx = (l + r) * 0.5f;
     float th = 1.5f * sy;
 
@@ -227,11 +226,18 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     const CRGBA black(0, 0, 0, (unsigned char)g_cfg.alpha);
     const CRGBA white(255, 255, 255, 255);
 
-    // 1) Siyah kutu: orijinal panelin ALTINA çizilir. Kutu orijinal panelin tamamını kapsadığı için
-    //    orijinalin yarı saydam paneli üstüne binince kenarları taşmaz.
+    // 1) Siyah kutu: orijinal panelle aynı ölçüde, orijinalin ALTINA çizilir.
     Rect(l, t, r, b, black);
 
-    // 2) Orijinal kod: panel, "Tattoo" başlığı, yazılar, fiyatlar, seçim vurgusu.
+    // 2) Beyaz çerçeve: kutunun hemen DIŞINDA ve orijinal koddan ÖNCE çizilir.
+    //    Böylece "Tattoo" başlığı (panelin üst kenarına taşıyor) çizginin ÜSTÜNDE kalır
+    //    ve orijinal yarı saydam panel çerçeveyi soldurmaz.
+    const float th  = g_cfg.frame * sy;      // her iki yönde aynı piksel kalınlığı
+    const float gap = g_cfg.frameGap * sy;
+    const float fl = l - gap - th, ft = t - gap - th, fr = r + gap + th, fb = b + gap + th;
+    FrameRect(fl, ft, fr, fb, th, white);
+
+    // 3) Orijinal kod: panel, "Tattoo" başlığı, yazılar, fiyatlar, seçim vurgusu.
     //    m_bColumnBackground'a DOKUNMUYORUZ (kapatınca yazılar bozuluyordu).
     bool oldBg = p->m_bColumnBackground;
     if (g_cfg.hideOriginalBackground)
@@ -241,12 +247,9 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
 
     p->m_bColumnBackground = oldBg;
 
-    // 3) Beyaz çerçeve ve alt süs: orijinal panelin ÜSTÜNE çizilir ki gri panel onları soldurmasın.
-    //    (İnce şeritler, yazıların üstüne taşmaz.)
-    float gap = g_cfg.frameGap * sx;
-    FrameRect(l + gap, t + gap * (sy / sx), r - gap, b - gap * (sy / sx), g_cfg.frame * sy, white);
+    // 4) Alt süs: alt çerçeve çizgisinin ÜSTÜNE, çizgiyle aynı hizada çizilir.
     if (g_cfg.ornament)
-        DrawOrnament(l, r, b + 3.0f * sy, sx, sy, white);
+        DrawOrnament(fl, fr, fb - th * 0.5f, sx, sy, white);
 }
 
 static void InstallHook() {
