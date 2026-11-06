@@ -61,7 +61,7 @@ jobs:
           Get-ChildItem "$sdk\output\lib" -Recurse -Filter *.lib | ForEach-Object { Write-Host $_.FullName }
 
           $lib = Get-ChildItem "$sdk\output\lib" -Recurse -Filter *.lib |
-                 Where-Object { $_.Name -match 'sa' -and $_.Name -notmatch '_d\.lib$' -and $_.Name -notmatch 'unreal' } |
+                 Where-Object { $_.Name -notmatch '_d\.lib$' -and $_.Name -notmatch 'unreal' } |
                  Select-Object -First 1
           if (-not $lib) { throw "plugin_sa .lib dosyasi bulunamadi" }
           Write-Host "Kullanilan kutuphane: $($lib.FullName)"
