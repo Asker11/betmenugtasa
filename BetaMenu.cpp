@@ -46,9 +46,12 @@ struct Config {
     float headerH = 14.52f;  // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
     float rowH    = 14.52f;  // satır aralığı
 
-    int   alpha    = 215;    // kutu şeffaflığı (0-255)
+    // Ekstra kutu koyuluğu (0-255). Orijinal panel zaten ~%74 siyah; ikisi üst üste biner.
+    // 0 = orijinalle aynı koyuluk. Sahne parlaklığı kalan oran = 0.255 * (1 - alpha/255)  (ölçüldü).
+    int   alpha    = 0;
     float frame    = 2.0f;   // beyaz çerçeve kalınlığı
     float frameGap = 0.0f;   // kutu ile çerçeve arası boşluk (çerçeve kutunun DIŞINDA çizilir)
+    float outline  = 1.5f;   // beyaz çerçevenin dışındaki siyah kontur kalınlığı (sanal birim)
 
     float ornH     = 22.0f;  // ornament bandının yüksekliği
 };
@@ -93,6 +96,7 @@ static void LoadConfig() {
     g_cfg.alpha    = GetPrivateProfileIntA("BetaMenu", "BoxAlpha", d.alpha, ini.c_str());
     g_cfg.frame    = ReadF("FrameThickness", d.frame, ini);
     g_cfg.frameGap = ReadF("FrameGap", d.frameGap, ini);
+    g_cfg.outline  = ReadF("OutlineThickness", d.outline, ini);
     g_cfg.ornH     = ReadF("OrnamentHeight", d.ornH, ini);
 }
 
@@ -235,6 +239,10 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     const float th  = g_cfg.frame * sy;      // her iki yönde aynı piksel kalınlığı
     const float gap = g_cfg.frameGap * sy;
     const float fl = l - gap - th, ft = t - gap - th, fr = r + gap + th, fb = b + gap + th;
+    // Önce siyah kontur (beyaz çizginin hemen dışında), sonra beyaz çizgi.
+    const float ot = g_cfg.outline * sy;
+    if (ot > 0.0f)
+        FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, 255));
     FrameRect(fl, ft, fr, fb, th, white);
 
     // 3) Orijinal kod: panel, "Tattoo" başlığı, yazılar, fiyatlar, seçim vurgusu.
