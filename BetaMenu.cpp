@@ -20,6 +20,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 using namespace plugin;
@@ -33,7 +34,7 @@ struct Config {
     // Kutu, panelin (m_vPosn) konumuna göre; hepsi 640x448 sanal koordinat
     float offsetX = -4.0f;
     float offsetY = -8.0f;
-    float extraW  = 12.0f;   // sütun genişlikleri toplamına eklenir
+    float extraW  = 22.0f;   // sütun genişlikleri toplamına eklenir
     float extraH  = 16.0f;   // satır yüksekliklerine eklenir
 
     float titleH  = 23.0f;   // panel üstünden ilk satıra kadar boşluk (başlık alanı)
@@ -132,31 +133,53 @@ static void DrawOrnament(float l, float r, float top, float sx, float sy, const 
 }
 
 // ---------------------------------------------------------------- tanı logu
-// Panel değerlerini BetaMenu.log dosyasına yazar (aynı değerler tekrar yazılmaz, en fazla 30 kayıt).
+// Her çağrıyı zaman damgasıyla BetaMenu.log dosyasına yazar. Amaç: oyun bu fonksiyonu bir karede
+// kaç kez ve hangi panelle çağırıyor görmek. Panel durumu (id, konum, satır, yazı anahtarları)
+// değiştiğinde, o andan sonraki ilk 8 çağrı kaydedilir; toplam en fazla 250 satır.
+static double NowMs() {
+    static LARGE_INTEGER freq = {};
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER c; QueryPerformanceCounter(&c);
+    return (double)c.QuadPart * 1000.0 / (double)freq.QuadPart;
+}
+
+static void RowKey(const tMenuPanel* p, int col, int row, char* out /*11 byte*/) {
+    if (col < 0 || col >= 4 || row < 0 || row >= 12) { out[0] = '\0'; return; }
+    memcpy(out, p->m_aaacRowTitles[col][row], 10);
+    out[10] = '\0';
+}
+
 static void LogPanel(unsigned char id, const tMenuPanel* p, float sx, float sy,
                      float width, float l, float t, float r, float b) {
-    static int   count    = 0;
-    static float lastX    = -12345.0f, lastY = -12345.0f;
-    static int   lastRows = -1;
-    if (count >= 30) return;
-    if (p->m_vPosn.x == lastX && p->m_vPosn.y == lastY && p->m_nNumRows == lastRows) return;
-    lastX = p->m_vPosn.x; lastY = p->m_vPosn.y; lastRows = p->m_nNumRows;
-    ++count;
+    static int  lines = 0;
+    static int  sinceChange = 0;
+    static char lastSig[256] = {};
+    if (lines >= 250) return;
+
+    char k00[11], k01[11], k10[11], k11[11];
+    RowKey(p, 0, 0, k00); RowKey(p, 0, 1, k01); RowKey(p, 1, 0, k10); RowKey(p, 1, 1, k11);
+
+    char sig[256];
+    sprintf_s(sig, "%d|%.1f|%.1f|%d|%d|%s|%s|%s|%s", (int)id, p->m_vPosn.x, p->m_vPosn.y,
+              (int)p->m_nNumColumns, (int)p->m_nNumRows, k00, k01, k10, k11);
+    if (strcmp(sig, lastSig) != 0) { strcpy_s(lastSig, sig); sinceChange = 0; }
+    if (sinceChange++ >= 8) return;
 
     std::string path = IniPath();
     if (path.size() > 4) path = path.substr(0, path.size() - 4) + ".log";
     FILE* f = nullptr;
     if (fopen_s(&f, path.c_str(), "a") != 0 || !f) return;
-    fprintf(f, "--- panel %d | ekran %d x %d | sx=%.4f sy=%.4f\n",
-            (int)id, (int)RsGlobal.maximumWidth, (int)RsGlobal.maximumHeight, sx, sy);
-    fprintf(f, "type=%d title='%.8s' cols=%d rows=%d colBg=%d\n",
-            (int)p->m_nType, p->m_acTitle, (int)p->m_nNumColumns, (int)p->m_nNumRows,
-            (int)p->m_bColumnBackground);
-    fprintf(f, "posX=%.3f posY=%.3f\n", p->m_vPosn.x, p->m_vPosn.y);
-    fprintf(f, "colWidth: %.3f %.3f %.3f %.3f (toplam %.3f)\n",
-            p->m_afColumnWidth[0], p->m_afColumnWidth[1], p->m_afColumnWidth[2], p->m_afColumnWidth[3], width);
-    fprintf(f, "cizilen kutu (piksel): l=%.1f t=%.1f r=%.1f b=%.1f\n\n", l, t, r, b);
+    if (lines == 0)
+        fprintf(f, "ekran %d x %d | sx=%.4f sy=%.4f\n", (int)RsGlobal.maximumWidth,
+                (int)RsGlobal.maximumHeight, sx, sy);
+    fprintf(f, "[t=%.3f ms] id=%d inUse=%d%d type=%d pos=(%.1f,%.1f) cols=%d rows=%d colBg=%d "
+               "w=%.0f/%.0f key00='%s' key01='%s' key10='%s' key11='%s' selRow=%d box=(%.0f,%.0f,%.0f,%.0f)\n",
+            NowMs(), (int)id, (int)CMenuSystem::MenuInUse[0], (int)CMenuSystem::MenuInUse[1],
+            (int)p->m_nType, p->m_vPosn.x, p->m_vPosn.y, (int)p->m_nNumColumns, (int)p->m_nNumRows,
+            (int)p->m_bColumnBackground, p->m_afColumnWidth[0], p->m_afColumnWidth[1],
+            k00, k01, k10, k11, (int)p->m_nSelectedRow, l, t, r, b);
     fclose(f);
+    ++lines;
 }
 
 // ---------------------------------------------------------------- hook
