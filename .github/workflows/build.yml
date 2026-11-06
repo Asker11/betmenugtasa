@@ -1,0 +1,95 @@
+name: Build BetaMenu.asi
+
+# Elle başlatmak için: GitHub'da Actions > "Build BetaMenu.asi" > Run workflow
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PLUGIN_SDK_DIR: ${{ github.workspace }}\plugin-sdk
+
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+
+      - name: plugin-sdk ve MinHook indir
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git plugin-sdk
+          git clone --depth 1 https://github.com/TsudaKageyu/minhook.git minhook
+
+      # 32 bit (x86) MSVC ortamı: GTA SA 32 bit olduğu için .asi de 32 bit olmalı
+      - name: MSVC x86 ortamını hazırla
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: plugin-sdk çözümünü (plugin.sln) üret
+        shell: pwsh
+        run: |
+          $sdk = $env:PLUGIN_SDK_DIR
+          $pm = Join-Path $sdk 'tools\premake\premake5.exe'
+          if (-not (Test-Path $pm)) {
+            Write-Host "SDK içinde premake5.exe yok, indiriliyor..."
+            Invoke-WebRequest -Uri "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip" -OutFile premake.zip
+            Expand-Archive premake.zip -DestinationPath premake
+            $pm = (Resolve-Path 'premake\premake5.exe').Path
+          }
+          Push-Location (Join-Path $sdk 'tools\premake')
+          & $pm vs2022
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0) { throw "premake basarisiz: $code" }
+          Get-ChildItem $sdk -Filter *.sln -Recurse | Select-Object -ExpandProperty FullName
+
+      - name: plugin_sa kütüphanesini derle (Release)
+        shell: pwsh
+        run: |
+          $sln = Get-ChildItem $env:PLUGIN_SDK_DIR -Filter plugin.sln -Recurse | Select-Object -First 1
+          if (-not $sln) { throw "plugin.sln bulunamadi" }
+          msbuild $sln.FullName /m /t:plugin_sa /p:Configuration=Release /p:Platform=Win32
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Cozumdeki projeler:"
+            Select-String -Path $sln.FullName -Pattern '^Project\('
+            throw "plugin_sa derlenemedi"
+          }
+
+      - name: BetaMenu.asi derle
+        shell: pwsh
+        run: |
+          $sdk = $env:PLUGIN_SDK_DIR
+          Write-Host "Bulunan kutuphaneler:"
+          Get-ChildItem "$sdk\output\lib" -Recurse -Filter *.lib | ForEach-Object { Write-Host $_.FullName }
+
+          $lib = Get-ChildItem "$sdk\output\lib" -Recurse -Filter *.lib |
+                 Where-Object { $_.Name -match 'sa' -and $_.Name -notmatch '_d\.lib$' -and $_.Name -notmatch 'unreal' } |
+                 Select-Object -First 1
+          if (-not $lib) { throw "plugin_sa .lib dosyasi bulunamadi" }
+          Write-Host "Kullanilan kutuphane: $($lib.FullName)"
+
+          $inc = @('plugin_sa','plugin_sa\game_sa','plugin_sa\game_sa\enums','plugin_sa\game_sa\rw',
+                   'shared','shared\game','shared\dxsdk','shared\dxsdk\include','safetyhook') |
+                 ForEach-Object { Join-Path $sdk $_ } | Where-Object { Test-Path $_ } |
+                 ForEach-Object { "/I$_" }
+
+          $srcs = @('BetaMenu.cpp',
+                    'minhook\src\buffer.c','minhook\src\hook.c','minhook\src\trampoline.c','minhook\src\hde\hde32.c')
+
+          $args = @('/nologo','/LD','/MT','/O2','/std:c++17','/EHsc','/utf-8',
+                    '/DGTASA','/DPLUGIN_SGV_10US','/DRW','/D_DX9_SDK_INSTALLED','/D_CRT_SECURE_NO_WARNINGS',
+                    "/Iminhook\include") + $inc + $srcs +
+                  @('/Fe:BetaMenu.asi','/link',$lib.FullName,'user32.lib','kernel32.lib','winmm.lib')
+
+          & cl.exe @args
+          if ($LASTEXITCODE -ne 0) { throw "BetaMenu.asi derlenemedi" }
+
+      - name: Çıktıyı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetaMenu
+          path: |
+            BetaMenu.asi
+            BetaMenu.ini
