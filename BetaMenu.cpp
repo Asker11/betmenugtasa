@@ -18,6 +18,7 @@
 #include "MinHook.h"
 
 #include <windows.h>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -130,6 +131,34 @@ static void DrawOrnament(float l, float r, float top, float sx, float sy, const 
     }
 }
 
+// ---------------------------------------------------------------- tanı logu
+// Panel değerlerini BetaMenu.log dosyasına yazar (aynı değerler tekrar yazılmaz, en fazla 30 kayıt).
+static void LogPanel(unsigned char id, const tMenuPanel* p, float sx, float sy,
+                     float width, float l, float t, float r, float b) {
+    static int   count    = 0;
+    static float lastX    = -12345.0f, lastY = -12345.0f;
+    static int   lastRows = -1;
+    if (count >= 30) return;
+    if (p->m_vPosn.x == lastX && p->m_vPosn.y == lastY && p->m_nNumRows == lastRows) return;
+    lastX = p->m_vPosn.x; lastY = p->m_vPosn.y; lastRows = p->m_nNumRows;
+    ++count;
+
+    std::string path = IniPath();
+    if (path.size() > 4) path = path.substr(0, path.size() - 4) + ".log";
+    FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "a") != 0 || !f) return;
+    fprintf(f, "--- panel %d | ekran %d x %d | sx=%.4f sy=%.4f\n",
+            (int)id, (int)RsGlobal.maximumWidth, (int)RsGlobal.maximumHeight, sx, sy);
+    fprintf(f, "type=%d title='%.8s' cols=%d rows=%d colBg=%d\n",
+            (int)p->m_nType, p->m_acTitle, (int)p->m_nNumColumns, (int)p->m_nNumRows,
+            (int)p->m_bColumnBackground);
+    fprintf(f, "posX=%.3f posY=%.3f\n", p->m_vPosn.x, p->m_vPosn.y);
+    fprintf(f, "colWidth: %.3f %.3f %.3f %.3f (toplam %.3f)\n",
+            p->m_afColumnWidth[0], p->m_afColumnWidth[1], p->m_afColumnWidth[2], p->m_afColumnWidth[3], width);
+    fprintf(f, "cizilen kutu (piksel): l=%.1f t=%.1f r=%.1f b=%.1f\n\n", l, t, r, b);
+    fclose(f);
+}
+
 // ---------------------------------------------------------------- hook
 typedef void(__cdecl* DisplayStandardMenuFn)(unsigned char, bool);
 static DisplayStandardMenuFn g_origDisplay = nullptr;
@@ -153,6 +182,8 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     const float t = (p->m_vPosn.y + g_cfg.offsetY) * sy;
     const float r = l + (width + g_cfg.extraW) * sx;
     const float b = t + (g_cfg.titleH + g_cfg.headerH + p->m_nNumRows * g_cfg.rowH + g_cfg.extraH) * sy;
+
+    LogPanel(panelId, p, sx, sy, width, l, t, r, b);
 
     const CRGBA black(0, 0, 0, (unsigned char)g_cfg.alpha);
     const CRGBA white(255, 255, 255, 255);
