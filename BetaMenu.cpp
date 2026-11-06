@@ -15,7 +15,9 @@
 #include "CSprite2d.h"
 #include "CRect.h"
 #include "CRGBA.h"
+#include "RenderWare.h"
 #include "MinHook.h"
+#include "ornament_data.h"   // süs dokusu (sol/sağ yarı), .asi içine gömülü
 
 #include <windows.h>
 #include <cstdio>
@@ -53,7 +55,9 @@ struct Config {
     float frameGap = 0.0f;   // kutu ile çerçeve arası boşluk (çerçeve kutunun DIŞINDA çizilir)
     float outline  = 1.5f;   // beyaz çerçevenin dışındaki siyah kontur kalınlığı (sanal birim)
 
-    float ornH     = 22.0f;  // ornament bandının yüksekliği
+    float ornH     = 28.0f;  // süsün yüksekliği (sanal birim); genişlik orandan otomatik hesaplanır
+    float ornX     = 0.0f;   // süsü kenarlardan DIŞARI kaydır (+ dışarı, - içeri)
+    float ornY     = 0.0f;   // süsü aşağı kaydır (+ aşağı, - yukarı)
 };
 static Config g_cfg;
 
@@ -98,6 +102,8 @@ static void LoadConfig() {
     g_cfg.frameGap = ReadF("FrameGap", d.frameGap, ini);
     g_cfg.outline  = ReadF("OutlineThickness", d.outline, ini);
     g_cfg.ornH     = ReadF("OrnamentHeight", d.ornH, ini);
+    g_cfg.ornX     = ReadF("OrnamentOffsetX", d.ornX, ini);
+    g_cfg.ornY     = ReadF("OrnamentOffsetY", d.ornY, ini);
 }
 
 // ---------------------------------------------------------------- çizim yardımcıları
@@ -140,6 +146,71 @@ static void DrawOrnament(float l, float r, float cy, float sx, float sy, const C
         Rect(x, cy - dia[i].h * 0.5f * sy, x + wsum[i] * sx, cy + dia[i].h * 0.5f * sy, c);
         x += wsum[i] * sx;
     }
+}
+
+// ---------------------------------------------------------------- süs dokusu
+// ornament_data.h içindeki RLE verisini (gri+alfa) RenderWare dokusuna açar. D3D9 8888 formatı bellekte BGRA'dır.
+static CSprite2d* g_ornL = nullptr;
+static CSprite2d* g_ornR = nullptr;
+
+static RwTexture* CreateOrnamentTexture(const unsigned char* rle, size_t len) {
+    RwRaster* ras = RwRasterCreate(kOrnTexW, kOrnTexH, 32, rwRASTERTYPETEXTURE | rwRASTERFORMAT8888);
+    if (!ras) return nullptr;
+    RwUInt8* dst = RwRasterLock(ras, 0, rwRASTERLOCKWRITE);
+    if (!dst) { RwRasterDestroy(ras); return nullptr; }
+
+    const size_t stride = ras->stride > 0 ? (size_t)ras->stride : (size_t)kOrnTexW * 4;
+    const size_t total  = (size_t)kOrnTexW * kOrnTexH;
+    size_t pix = 0;
+    for (size_t i = 0; i + 2 < len && pix < total; i += 3) {
+        const int cnt = rle[i];
+        const unsigned char L = rle[i + 1], A = rle[i + 2];
+        for (int k = 0; k < cnt && pix < total; ++k, ++pix) {
+            RwUInt8* d = dst + (pix / kOrnTexW) * stride + (pix % kOrnTexW) * 4;
+            d[0] = L; d[1] = L; d[2] = L; d[3] = A;
+        }
+    }
+    RwRasterUnlock(ras);
+
+    RwTexture* tex = RwTextureCreate(ras);
+    if (!tex) { RwRasterDestroy(ras); return nullptr; }
+    RwTextureSetFilterMode(tex, rwFILTERLINEAR);
+    RwTextureSetAddressing(tex, rwTEXTUREADDRESSCLAMP);
+    return tex;
+}
+
+static void CreateOrnamentSprites() {
+    if (g_ornL && g_ornR) return;
+    RwTexture* tl = CreateOrnamentTexture(kOrnLeftRle,  sizeof(kOrnLeftRle));
+    RwTexture* tr = CreateOrnamentTexture(kOrnRightRle, sizeof(kOrnRightRle));
+    if (!tl || !tr) return;                      // olmazsa DrawRect süsü (yedek) kullanılır
+    // CSprite2d'yi bilerek silmiyoruz (oyun kapanırken yıkıcı çağrılırsa çökme riski olmasın).
+    g_ornL = new CSprite2d(); g_ornL->m_pTexture = tl;
+    g_ornR = new CSprite2d(); g_ornR->m_pTexture = tr;
+}
+
+// Süs iki yarım parçadır: sol yarı sol köşeye, sağ yarı sağ köşeye. Parçaların "kuyruk çizgisi"
+// (kOrnLineV) alt çerçeve çizgisinin ortasına oturur; aradaki boşlukta çerçevenin kendi çizgisi görünür.
+static bool DrawOrnamentTextured(float fl, float fr, float cy, float sx, float sy, const CRGBA& white) {
+    if (!g_ornL || !g_ornR) return false;
+
+    float h = g_cfg.ornH * sy;
+    float w = h / kOrnHalfAspect;                // yarım parçanın piksel genişliği (oran korunur)
+    const float avail = (fr - fl) * 0.98f;       // dar menülerde iki parça çakışmasın
+    if (2.0f * w > avail) { const float k = avail / (2.0f * w); w *= k; h *= k; }
+
+    const float top = cy - kOrnLineV * h + g_cfg.ornY * sy;
+    const float bot = top + h;
+    const float lx  = fl - g_cfg.ornX * sx;
+    const float rx  = fr + g_cfg.ornX * sx;
+
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND,  (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+
+    g_ornL->Draw(CRect(lx,     bot, lx + w, top), white);   // CRect: (sol, alt, sağ, üst)
+    g_ornR->Draw(CRect(rx - w, bot, rx,     top), white);
+    return true;
 }
 
 // ---------------------------------------------------------------- tanı logu
@@ -256,8 +327,12 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     p->m_bColumnBackground = oldBg;
 
     // 4) Alt süs: alt çerçeve çizgisinin ÜSTÜNE, çizgiyle aynı hizada çizilir.
-    if (g_cfg.ornament)
-        DrawOrnament(fl, fr, fb - th * 0.5f, sx, sy, white);
+    //    Doku yüklenemediyse eski DrawRect süsü yedek olarak çizilir.
+    if (g_cfg.ornament) {
+        const float cy = fb - th * 0.5f;
+        if (!DrawOrnamentTextured(fl, fr, cy, sx, sy, white))
+            DrawOrnament(fl, fr, cy, sx, sy, white);
+    }
 }
 
 static void InstallHook() {
@@ -273,7 +348,7 @@ public:
     BetaMenuMod() {
         LoadConfig();
 
-        Events::initRwEvent += [] { InstallHook(); };
+        Events::initRwEvent += [] { CreateOrnamentSprites(); InstallHook(); };
 
         // F10: ini'yi oyunu kapatmadan yeniden yükle (ölçü ayarı için)
         Events::gameProcessEvent += [] {
