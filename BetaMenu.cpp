@@ -47,9 +47,9 @@ struct Config {
     float extraW  = 14.67f;  // sütun genişlikleri toplamına eklenir
     float extraH  = 0.0f;    // alt pay
 
-    float titleH  = 46.0f;   // satırlardan bağımsız sabit yükseklik (başlık alanı + alt pay)
-    float headerH = 19.0f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
-    float rowH    = 15.0f;   // satır aralığı
+    float titleH  = 46.5f;   // satırlardan bağımsız sabit yükseklik (başlık alanı + alt pay)
+    float headerH = 18.5f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
+    float rowH    = 14.9f;   // satır aralığı
 
     // Ekstra kutu koyuluğu (0-255). Orijinal panel zaten ~%74 siyah; ikisi üst üste biner.
     // 0 = orijinalle aynı koyuluk. Sahne parlaklığı kalan oran = 0.255 * (1 - alpha/255)  (ölçüldü).
