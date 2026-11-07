@@ -435,7 +435,7 @@ static void LogBigRect(const CRect& rc, const CRGBA& c, void* ret) {
     static unsigned seen[256]; static int n = 0;
     float w = rc.right - rc.left; if (w < 0) w = -w;
     float h = rc.bottom - rc.top; if (h < 0) h = -h;
-    if (w < 150.0f || h < 40.0f) return;   // 40: tek satırlık küçük kutular (ör. Cheat activated) da görünsün
+    if (w < 100.0f || h < 30.0f) return;   // 30: tek satırlık küçük kutular (ör. Cheat activated) da görünsün
     unsigned key = (unsigned)(uintptr_t)ret ^ ((unsigned)(int)rc.left * 31u) ^ ((unsigned)(int)rc.top * 17u);
     for (int i = 0; i < n; ++i) if (seen[i] == key) return;
     if (n >= 256) return;
@@ -552,6 +552,23 @@ static void TryInstallRectHook() {
     if (g_cfg.helpFrame) level1 = bfs((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000);
     // Keşif: Log=1 iken CHud::Draw'dan (0x58FAE0, doğrulanmadı) da taranır; büyük kutuların çağıranı loglanır.
     if (g_cfg.log) bfs((uintptr_t)0x58FAE0, 0x1000);
+    // Keşif (sadece Log=1): exe'deki TÜM "call DrawRect" yerleri yamalanır (hepsi gated geçiş; sadece logluyor).
+    if (g_cfg.log) {
+        int all = 0;
+        for (uintptr_t a = 0x401000; a < 0x85F000; ++a) {
+            unsigned char* p = (unsigned char*)a;
+            if (p[0] != 0xE8) continue;
+            if ((uintptr_t)(p + 5) + (uintptr_t)*(int*)(p + 1) != (uintptr_t)BM_ADDR_DRAWRECT) continue;
+            DWORD old = 0;
+            if (!VirtualProtect(p + 1, 4, PAGE_EXECUTE_READWRITE, &old)) continue;
+            *(int*)(p + 1) = (int)((uintptr_t)&HookedDrawRect - (uintptr_t)(p + 5));
+            VirtualProtect(p + 1, 4, old, &old);
+            FlushInstructionCache(GetCurrentProcess(), p, 5);
+            ++all;
+        }
+        FILE* fa = OpenLogAppend();
+        if (fa) { fprintf(fa, "helpframe: tum exe taramasi: %d call yeri daha yamalandi\n", all); fclose(fa); }
+    }
     FILE* f = OpenLogAppend();
     if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (alt fonksiyon: ilk seviye %d, toplam %d; 0 ise cerceve cikmaz)\n", found, level1, nFns); fclose(f); }
 }
