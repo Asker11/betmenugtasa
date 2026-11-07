@@ -379,6 +379,14 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     }
 }
 
+static FILE* OpenLogAppend() {
+    std::string path = IniPath();
+    if (path.size() > 4) path = path.substr(0, path.size() - 4) + ".log";
+    FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "a") != 0) return nullptr;
+    return f;
+}
+
 // ---------------------------------------------------------------- yardım kutusu çerçevesi
 // CHud::DrawHelpText sırasında çağrılan CSprite2d::DrawRect çağrılarının sınırlayıcı kutusu yakalanır,
 // yardım metni bitince bu kutunun DIŞINA siyah kontur + LineColor çizgi çizilir (süs yok).
@@ -417,6 +425,8 @@ static void __cdecl HookedDrawHelpText() {
     g_inHelp = true; g_haveRect = false;
     g_origHelp();
     g_inHelp = false;
+    static int calls = 0;
+    if (calls < 3) { ++calls; FILE* fc = OpenLogAppend(); if (fc) { fprintf(fc, "helpframe: DrawHelpText cagrildi, rect yakalandi=%d\n", (int)g_haveRect); fclose(fc); } }
     if (!g_haveRect) return;
     const float sy = (float)RsGlobal.maximumHeight / 448.0f;
     const float th = g_cfg.helpFrameTh * sy, ot = g_cfg.helpOutline * sy;
@@ -427,7 +437,7 @@ static void __cdecl HookedDrawHelpText() {
     if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, 255));
     FrameRect(fl, ft, fr, fb, th, line);
     if (g_cfg.log) {
-        FILE* f = fopen("BetaMenu.log", "a");
+        FILE* f = OpenLogAppend();
         if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f\n", g_hl, g_ht, g_hr, g_hb); fclose(f); }
     }
 }
@@ -442,7 +452,7 @@ static void InstallHook() {
     if (g_cfg.helpFrame) {
         LPVOID tr = (LPVOID)BM_ADDR_DRAWRECT, th = (LPVOID)BM_ADDR_DRAWHELPTEXT;
         // Tanı: adresler ve ilk baytlar BetaMenu.log'a yazılır (çökme olursa nedenini görmek için).
-        FILE* f = fopen("BetaMenu.log", "a");
+        FILE* f = OpenLogAppend();
         if (f) {
             fprintf(f, "helpframe: DrawRect=%p DrawHelpText=%p\n", tr, th);
             const unsigned char* a = (const unsigned char*)tr; const unsigned char* b = (const unsigned char*)th;
@@ -452,15 +462,20 @@ static void InstallHook() {
         }
         // Sadece geleneksel prologlar (push ebp / sub esp / push reg / mov) kabul edilir; aksi halde kurma.
         auto plausible = [](const unsigned char* p) {
-            return p[0] == 0x55 || p[0] == 0x83 || p[0] == 0x81 || p[0] == 0x6A || p[0] == 0x64 ||
+            return p[0] == 0xE9 || p[0] == 0xA0 || p[0] == 0x55 || p[0] == 0x83 || p[0] == 0x81 || p[0] == 0x6A || p[0] == 0x64 ||
                    p[0] == 0x56 || p[0] == 0x53 || p[0] == 0x51 || p[0] == 0x8B || p[0] == 0xA1 || p[0] == 0xD9;
         };
-        if (!plausible((const unsigned char*)tr) || !plausible((const unsigned char*)th)) return;
-        if (MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect) == MH_OK &&
-            MH_CreateHook(th, (LPVOID)&HookedDrawHelpText, (LPVOID*)&g_origHelp) == MH_OK) {
-            MH_EnableHook(tr);
-            MH_EnableHook(th);
+        if (!plausible((const unsigned char*)tr) || !plausible((const unsigned char*)th)) {
+            FILE* f3 = OpenLogAppend();
+            if (f3) { fprintf(f3, "helpframe: adres gecersiz gorunuyor, kurulmadi\n"); fclose(f3); }
+            return;
         }
+        MH_STATUS s1 = MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect);
+        MH_STATUS s2 = (s1 == MH_OK) ? MH_CreateHook(th, (LPVOID)&HookedDrawHelpText, (LPVOID*)&g_origHelp) : s1;
+        MH_STATUS s3 = (s2 == MH_OK) ? MH_EnableHook(tr) : s2;
+        MH_STATUS s4 = (s3 == MH_OK) ? MH_EnableHook(th) : s3;
+        FILE* f2 = OpenLogAppend();
+        if (f2) { fprintf(f2, "helpframe hook status: %d %d %d %d (0 = tamam)\n", (int)s1, (int)s2, (int)s3, (int)s4); fclose(f2); }
     }
 }
 
