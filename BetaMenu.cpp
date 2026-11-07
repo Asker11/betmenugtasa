@@ -429,19 +429,34 @@ static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
     g_origRect(rc, c);
 }
 
-// DrawRect başka bir mod tarafından da yamalı (ilk bayt E9) ve oyun açılışında/yükleme ekranında çok çağrılıyor.
-// Bu yüzden DrawRect hook'unu açılışta değil, oyun içinde yardım metni ~120 kez çizildikten SONRA kuruyoruz
-// (diğer modların yüklenmesi bitmiş olur, yükleme ekranı geçilmiş olur).
+// DrawRect'i (başka modlarla paylaşılan, açılışta çok çağrılan fonksiyon) HOOKLAMIYORUZ: çökme yapıyordu.
+// Onun yerine DrawHelpText'in KENDİ kodu içindeki "call DrawRect" komutlarının hedefini bizim fonksiyona
+// çeviriyoruz (sadece o çağrı yerleri değişir, DrawRect'in kendisine dokunulmaz). Oyun içinde, yardım
+// metni ~120 kez çizildikten sonra bir kez yapılır.
 static void TryInstallRectHook() {
     static bool tried = false;
     static int frames = 0;
     if (tried || ++frames < 120) return;
     tried = true;
-    LPVOID tr = (LPVOID)BM_ADDR_DRAWRECT;
-    MH_STATUS s1 = MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect);
-    MH_STATUS s2 = (s1 == MH_OK) ? MH_EnableHook(tr) : s1;
+    g_origRect = (DrawRectFn)(uintptr_t)BM_ADDR_DRAWRECT;
+    unsigned char* base = (unsigned char*)(uintptr_t)BM_ADDR_DRAWHELPTEXT;
+    int found = 0;
+    for (int i = 5; i < 0x800; ++i) {
+        if (base[i] != 0xE8) continue;
+        int rel = *(int*)(base + i + 1);
+        uintptr_t target = (uintptr_t)(base + i + 5) + (uintptr_t)rel;
+        if (target != (uintptr_t)BM_ADDR_DRAWRECT) continue;
+        DWORD old = 0;
+        if (!VirtualProtect(base + i + 1, 4, PAGE_EXECUTE_READWRITE, &old)) continue;
+        *(int*)(base + i + 1) = (int)((uintptr_t)&HookedDrawRect - (uintptr_t)(base + i + 5));
+        VirtualProtect(base + i + 1, 4, old, &old);
+        FlushInstructionCache(GetCurrentProcess(), base + i, 5);
+        ++found;
+        FILE* f = OpenLogAppend();
+        if (f) { fprintf(f, "helpframe: call yeri yamalandi: DrawHelpText+0x%X\n", i); fclose(f); }
+    }
     FILE* f = OpenLogAppend();
-    if (f) { fprintf(f, "helpframe: DrawRect hook (gec kurulum) status: %d %d\n", (int)s1, (int)s2); fclose(f); }
+    if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (0 ise cerceve cikmaz)\n", found); fclose(f); }
 }
 
 static void __cdecl HookedDrawHelpText() {
