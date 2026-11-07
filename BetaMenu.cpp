@@ -72,6 +72,9 @@ struct Config {
     bool  helpFrame   = false;
     float helpFrameTh = 2.0f;  // beyaz çizgi kalınlığı (sanal birim)
     float helpOutline = 2.0f;  // dış siyah kontur (sanal birim)
+    unsigned ornColor = 0xE1E1E1; // süsün rengi (RRGGBB), LineColor'dan bağımsız
+    bool  statsOrnament = false;  // Stats paneline de alt süs
+    float statsOrnY   = 0.0f;     // Stats süsünü aşağı (+) / yukarı (-) kaydır (sanal birim)
     float cornerCut   = 1.5f;  // çizgi köşelerinin yassılığı (sanal birim, 0 = dik köşe)
     bool  statsFrame  = false; // Tab ile açılan Stats paneli için çerçeve (kalınlık: HelpBox ayarları)
 };
@@ -132,6 +135,15 @@ static void LoadConfig() {
     g_cfg.helpFrame   = ReadB("HelpBoxFrame", d.helpFrame, ini);
     g_cfg.statsFrame  = ReadB("StatsBoxFrame", d.statsFrame, ini);
     g_cfg.cornerCut   = ReadF("CornerCut", d.cornerCut, ini);
+    g_cfg.statsOrnament = ReadB("StatsBoxOrnament", d.statsOrnament, ini);
+    g_cfg.statsOrnY   = ReadF("StatsBoxOrnamentOffsetY", d.statsOrnY, ini);
+    {
+        // OrnamentColor=E1E1E1 (başında # olabilir). Ini'de yoksa LineColor'a değil, kendi varsayılanına döner.
+        char cb[16] = {};
+        GetPrivateProfileStringA("BetaMenu", "OrnamentColor", "E1E1E1", cb, sizeof(cb), ini.c_str());
+        const char* cs = (cb[0] == '#') ? cb + 1 : cb;
+        g_cfg.ornColor = (unsigned)strtoul(cs, nullptr, 16) & 0xFFFFFF;
+    }
     g_cfg.helpFrameTh = ReadF("HelpBoxFrameThickness", d.helpFrameTh, ini);
     g_cfg.helpOutline = ReadF("HelpBoxOutlineThickness", d.helpOutline, ini);
 }
@@ -257,7 +269,7 @@ static void CreateOrnamentSprites() {
 
 // Süs iki yarım parçadır: sol yarı sol köşeye, sağ yarı sağ köşeye. Parçaların "kuyruk çizgisi"
 // (kOrnLineV) alt çerçeve çizgisinin ortasına oturur; aradaki boşlukta çerçevenin kendi çizgisi görünür.
-static bool DrawOrnamentTextured(float fl, float fr, float cy, float sx, float sy, const CRGBA& white) {
+static bool DrawOrnamentTextured(float fl, float fr, float cy, float sx, float sy, const CRGBA& white, float extraY = 0.0f) {
     if (!g_ornL || !g_ornR) return false;
 
     float h = g_cfg.ornH * sy;
@@ -267,7 +279,7 @@ static bool DrawOrnamentTextured(float fl, float fr, float cy, float sx, float s
     const float span = (fr - fl) + 2.0f * g_cfg.ornX * sx;
     if (2.0f * w > span * 0.84f) { const float k = span * 0.84f / (2.0f * w); w *= k; h *= k; }
 
-    const float top = cy - kOrnLineV * h + g_cfg.ornY * sy;
+    const float top = cy - kOrnLineV * h + (g_cfg.ornY + extraY) * sy;
     const float bot = top + h;
     const float lx  = fl - g_cfg.ornX * sx;
     const float rx  = fr + g_cfg.ornX * sx;
@@ -416,8 +428,10 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     //    Doku yüklenemediyse eski DrawRect süsü yedek olarak çizilir.
     if (g_cfg.ornament) {
         const float cy = fb - th * 0.5f;
-        if (!DrawOrnamentTextured(fl, fr, cy, sx, sy, white))
-            DrawOrnament(fl, fr, cy, sx, sy, white);
+        const CRGBA ornC((unsigned char)((g_cfg.ornColor >> 16) & 0xFF), (unsigned char)((g_cfg.ornColor >> 8) & 0xFF),
+                         (unsigned char)(g_cfg.ornColor & 0xFF), 255);
+        if (!DrawOrnamentTextured(fl, fr, cy, sx, sy, ornC))
+            DrawOrnament(fl, fr, cy, sx, sy, ornC);
     }
 }
 
@@ -513,6 +527,12 @@ static void __cdecl HookedStatsRect(const CRect& rc, const CRGBA& c) {
     const float ck = g_cfg.cornerCut * sy;
     if (ot > 0.0f) ChamferOutline(l - th, t - th, r + th, b + th, ot, ck, CRGBA(0, 0, 0, (unsigned char)fa));
     ChamferFrame(l - th, t - th, r + th, b + th, th, ck, line);
+    if (g_cfg.statsOrnament) {
+        const float sx2 = (float)RsGlobal.maximumWidth / 640.0f;
+        CRGBA ornC((unsigned char)((g_cfg.ornColor >> 16) & 0xFF), (unsigned char)((g_cfg.ornColor >> 8) & 0xFF),
+                   (unsigned char)(g_cfg.ornColor & 0xFF), (unsigned char)fa);
+        DrawOrnamentTextured(l - th, r + th, b + th * 0.5f, sx2, sy, ornC, g_cfg.statsOrnY);
+    }
 }
 
 static void PatchStatsCall() {
