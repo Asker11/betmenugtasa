@@ -71,12 +71,24 @@ jobs:
                  ForEach-Object { Join-Path $sdk $_ } | Where-Object { Test-Path $_ } |
                  ForEach-Object { "/I$_" }
 
+          # Yardim kutusu hook adresleri: plugin-sdk basliklarindan cikar (bulunamazsa koddaki varsayilan kalir)
+          $defs = @()
+          $hdrs = Get-ChildItem "$sdk\plugin_sa\game_sa" -Filter *.h -Recurse
+          foreach ($pair in @(@('CHud::DrawHelpText\(\s*\)','BM_ADDR_DRAWHELPTEXT'),
+                              @('CSprite2d::DrawRect\(\s*CRect const&\s*\w*,\s*CRGBA const&\s*\w*\s*\)','BM_ADDR_DRAWRECT'))) {
+            $m = $hdrs | Select-String -Pattern $pair[0] | Select-Object -First 1
+            if ($m -and $m.Line -match '0x([0-9A-Fa-f]{6,8})') {
+              Write-Host "Adres bulundu $($pair[1]) = 0x$($Matches[1])"
+              $defs += "/D$($pair[1])=0x$($Matches[1])"
+            } else { Write-Host "Adres bulunamadi: $($pair[1]) (varsayilan kullanilacak)" }
+          }
+
           $srcs = @('BetaMenu.cpp',
                     'minhook\src\buffer.c','minhook\src\hook.c','minhook\src\trampoline.c','minhook\src\hde\hde32.c')
 
           $args = @('/nologo','/LD','/MT','/O2','/std:c++latest','/EHsc','/utf-8',
                     '/DGTASA','/DPLUGIN_SGV_10US','/DRW','/D_DX9_SDK_INSTALLED','/D_CRT_SECURE_NO_WARNINGS',
-                    "/Iminhook\include") + $inc + $srcs +
+                    "/Iminhook\include") + $defs + $inc + $srcs +
                   @('/Fe:BetaMenu.asi','/link',$lib.FullName,'user32.lib','kernel32.lib','winmm.lib')
 
           & cl.exe @args
