@@ -38,16 +38,18 @@ struct Config {
 
     // Kutu, orijinal panelle AYNI ölçüde. Orijinal panel (1920x1080 ekran görüntüsünden ölçüldü):
     //   sol kenar = posX, üst kenar = posY, genişlik = sütun toplamı + 44 px (=14.67 sanal),
-    //   yükseklik = 120 px + 35 px * (satır + başlık satırı)  (= 49.78 + 14.52*(satır+başlık) sanal).
+    //   yükseklik = 46 + 15 * satır + 19 * (başlık satırı varsa)  sanal birim
+    //   (5 farklı menüden ölçüldü: 9 satır/başlıksız 436 px, 2 satır/başlıksız 184 px,
+    //    1 satır+başlık 193 px, 2 satır+başlık 228 px; 1080p'de sy=2.4107).
     // Değerler 640x448 sanal birim; oyun çözünürlüğe göre ölçekler.
     float offsetX = 0.0f;
     float offsetY = 0.0f;
     float extraW  = 14.67f;  // sütun genişlikleri toplamına eklenir
     float extraH  = 0.0f;    // alt pay
 
-    float titleH  = 49.78f;  // panel üstünden ilk satıra kadar olan sabit yükseklik
-    float headerH = 14.52f;  // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
-    float rowH    = 14.52f;  // satır aralığı
+    float titleH  = 46.0f;   // satırlardan bağımsız sabit yükseklik (başlık alanı + alt pay)
+    float headerH = 19.0f;   // sütun başlığı satırı (sadece başlığı olan panellerde eklenir)
+    float rowH    = 15.0f;   // satır aralığı
 
     // Ekstra kutu koyuluğu (0-255). Orijinal panel zaten ~%74 siyah; ikisi üst üste biner.
     // 0 = orijinalle aynı koyuluk. Sahne parlaklığı kalan oran = 0.255 * (1 - alpha/255)  (ölçüldü).
