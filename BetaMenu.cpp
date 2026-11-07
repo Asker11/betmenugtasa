@@ -72,6 +72,7 @@ struct Config {
     bool  helpFrame   = false;
     float helpFrameTh = 2.0f;  // beyaz çizgi kalınlığı (sanal birim)
     float helpOutline = 2.0f;  // dış siyah kontur (sanal birim)
+    bool  statsFrame  = false; // Tab ile açılan Stats paneli için çerçeve (kalınlık: HelpBox ayarları)
 };
 static Config g_cfg;
 
@@ -128,6 +129,7 @@ static void LoadConfig() {
     g_cfg.ornY     = ReadF("OrnamentOffsetY", d.ornY, ini);
     g_cfg.ornOutline = ReadF("OrnamentOutline", d.ornOutline, ini);
     g_cfg.helpFrame   = ReadB("HelpBoxFrame", d.helpFrame, ini);
+    g_cfg.statsFrame  = ReadB("StatsBoxFrame", d.statsFrame, ini);
     g_cfg.helpFrameTh = ReadF("HelpBoxFrameThickness", d.helpFrameTh, ini);
     g_cfg.helpOutline = ReadF("HelpBoxOutlineThickness", d.helpOutline, ini);
 }
@@ -450,6 +452,44 @@ static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
     g_origRect(rc, c);
 }
 
+// Stats paneli (Tab): kutu 0x573EF4'teki "call DrawRect" ile çiziliyor (loglardan bulundu, SA 1.0 US).
+// Kutu çizildikten hemen sonra çerçeve çizilir; "Stats" başlığı ve yazılar sonradan çizildiği için çizginin üstünde kalır.
+static int g_statsRef = 1;
+static void __cdecl HookedStatsRect(const CRect& rc, const CRGBA& c) {
+    g_origRect(rc, c);
+    if (!g_cfg.enabled || !g_cfg.statsFrame) return;
+    float w = rc.right - rc.left; if (w < 0) w = -w;
+    float h = rc.bottom - rc.top; if (h < 0) h = -h;
+    if (w < 150.0f || h < 100.0f) return;            // sadece büyük arka plan kutusu
+    float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
+    float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
+    int a = c.a;
+    if (a > g_statsRef) g_statsRef = a;
+    int fa = (a * 255) / (g_statsRef > 0 ? g_statsRef : 1);
+    if (fa <= 0) return; if (fa > 255) fa = 255;
+    const float sy = (float)RsGlobal.maximumHeight / 448.0f;
+    const float th = g_cfg.helpFrameTh * sy, ot = g_cfg.helpOutline * sy;
+    CRGBA line((unsigned char)((g_cfg.lineColor >> 16) & 0xFF), (unsigned char)((g_cfg.lineColor >> 8) & 0xFF),
+               (unsigned char)(g_cfg.lineColor & 0xFF), (unsigned char)fa);
+    if (ot > 0.0f) FrameRect(l - th - ot, t - th - ot, r + th + ot, b + th + ot, ot, CRGBA(0, 0, 0, (unsigned char)fa));
+    FrameRect(l - th, t - th, r + th, b + th, th, line);
+}
+
+static void PatchStatsCall() {
+    unsigned char* p = (unsigned char*)0x573EF4;
+    bool ok = p[0] == 0xE8 && ((uintptr_t)(p + 5) + (uintptr_t)*(int*)(p + 1)) == (uintptr_t)BM_ADDR_DRAWRECT;
+    if (ok) {
+        DWORD old = 0;
+        if (VirtualProtect(p + 1, 4, PAGE_EXECUTE_READWRITE, &old)) {
+            *(int*)(p + 1) = (int)((uintptr_t)&HookedStatsRect - (uintptr_t)(p + 5));
+            VirtualProtect(p + 1, 4, old, &old);
+            FlushInstructionCache(GetCurrentProcess(), p, 5);
+        } else ok = false;
+    }
+    FILE* f = OpenLogAppend();
+    if (f) { fprintf(f, "helpframe: stats call yamasi %s\n", ok ? "tamam" : "BASARISIZ (bayt/hedef uymadi)"); fclose(f); }
+}
+
 // DrawRect'i (başka modlarla paylaşılan, açılışta çok çağrılan fonksiyon) HOOKLAMIYORUZ: çökme yapıyordu.
 // Onun yerine DrawHelpText'in KENDİ kodu içindeki "call DrawRect" komutlarının hedefini bizim fonksiyona
 // çeviriyoruz (sadece o çağrı yerleri değişir, DrawRect'in kendisine dokunulmaz). Oyun içinde, yardım
@@ -508,7 +548,8 @@ static void TryInstallRectHook() {
         }
         return nCur;
     };
-    level1 = bfs((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000);
+    if (g_cfg.statsFrame) PatchStatsCall();
+    if (g_cfg.helpFrame) level1 = bfs((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000);
     // Keşif: Log=1 iken CHud::Draw'dan (0x58FAE0, doğrulanmadı) da taranır; büyük kutuların çağıranı loglanır.
     if (g_cfg.log) bfs((uintptr_t)0x58FAE0, 0x1000);
     FILE* f = OpenLogAppend();
@@ -516,8 +557,9 @@ static void TryInstallRectHook() {
 }
 
 static void __cdecl HookedDrawHelpText() {
-    if (!g_cfg.enabled || !g_cfg.helpFrame) { g_origHelp(); return; }
+    if (!g_cfg.enabled || !(g_cfg.helpFrame || g_cfg.statsFrame)) { g_origHelp(); return; }
     TryInstallRectHook();
+    if (!g_cfg.helpFrame) { g_origHelp(); return; }
     g_inHelp = true; g_haveRect = false; g_hArea = 0.0f; g_hAlpha = 255;
     static int enters = 0;
     if (enters < 3) { ++enters; FILE* fe = OpenLogAppend(); if (fe) { fprintf(fe, "helpframe: DrawHelpText'e giriliyor (%d)\n", enters); fclose(fe); } }
@@ -557,7 +599,7 @@ static void InstallHook() {
         MH_EnableHook(target);
 
     // Yardım kutusu çerçevesi: sadece ini'de HelpBoxFrame=1 ise kurulur (kapalıyken oyuna hiç dokunmaz).
-    if (g_cfg.helpFrame) {
+    if (g_cfg.helpFrame || g_cfg.statsFrame) {
         LPVOID tr = (LPVOID)BM_ADDR_DRAWRECT, th = (LPVOID)BM_ADDR_DRAWHELPTEXT;
         // Tanı: adresler ve ilk baytlar BetaMenu.log'a yazılır (çökme olursa nedenini görmek için).
         FILE* f = OpenLogAppend();
