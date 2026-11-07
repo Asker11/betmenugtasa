@@ -440,20 +440,41 @@ static void TryInstallRectHook() {
     tried = true;
     g_origRect = (DrawRectFn)(uintptr_t)BM_ADDR_DRAWRECT;
     unsigned char* base = (unsigned char*)(uintptr_t)BM_ADDR_DRAWHELPTEXT;
-    int found = 0;
-    for (int i = 5; i < 0x800; ++i) {
+    // Bir adresten başlayıp "jmp rel32" (E9) zincirini takip eder; zincirdeki adresleri yazar.
+    auto chain = [](uintptr_t a, uintptr_t* out) {
+        int n = 0; out[n++] = a;
+        for (int h = 0; h < 3; ++h) {
+            const unsigned char* p = (const unsigned char*)a;
+            if (p[0] != 0xE9) break;
+            a = (uintptr_t)(p + 5) + (uintptr_t)*(int*)(p + 1);
+            out[n++] = a;
+        }
+        return n;
+    };
+    uintptr_t rectChain[4]; int rn = chain((uintptr_t)BM_ADDR_DRAWRECT, rectChain);
+    int found = 0, listed = 0;
+    for (int i = 5; i < 0x1000; ++i) {
         if (base[i] != 0xE8) continue;
         int rel = *(int*)(base + i + 1);
         uintptr_t target = (uintptr_t)(base + i + 5) + (uintptr_t)rel;
-        if (target != (uintptr_t)BM_ADDR_DRAWRECT) continue;
+        if (target < 0x401000 || target > 0x860000) {   // exe kod bölgesi dışı: başka modun yaması olabilir
+            if (target < 0x10000) continue;
+        }
+        uintptr_t tc[4]; int tn = chain(target, tc);
+        bool match = false;
+        for (int x = 0; x < tn && !match; ++x) for (int y = 0; y < rn; ++y) if (tc[x] == rectChain[y]) match = true;
+        if (listed < 40) {
+            ++listed;
+            FILE* fl = OpenLogAppend();
+            if (fl) { fprintf(fl, "helpframe: call @+0x%X -> %08X %s\n", i, (unsigned)target, match ? "(DrawRect)" : ""); fclose(fl); }
+        }
+        if (!match) continue;
         DWORD old = 0;
         if (!VirtualProtect(base + i + 1, 4, PAGE_EXECUTE_READWRITE, &old)) continue;
         *(int*)(base + i + 1) = (int)((uintptr_t)&HookedDrawRect - (uintptr_t)(base + i + 5));
         VirtualProtect(base + i + 1, 4, old, &old);
         FlushInstructionCache(GetCurrentProcess(), base + i, 5);
         ++found;
-        FILE* f = OpenLogAppend();
-        if (f) { fprintf(f, "helpframe: call yeri yamalandi: DrawHelpText+0x%X\n", i); fclose(f); }
     }
     FILE* f = OpenLogAppend();
     if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (0 ise cerceve cikmaz)\n", found); fclose(f); }
