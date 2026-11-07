@@ -408,7 +408,13 @@ static float g_hArea = 0.0f;       // en büyük (arka plan) dikdörtgenin alan�
 static int   g_hAlpha = 255;       // o dikdörtgenin alfası (fade-out sırasında düşer)
 static int   g_hRefAlpha = 1;      // görülen en yüksek arka plan alfası (tam görünürlük referansı)
 
+static int g_capLogged = 0;
 static void CaptureRect(const CRect& rc, const CRGBA& c) {
+    if (g_capLogged < 30) {
+        ++g_capLogged;
+        FILE* fl = OpenLogAppend();
+        if (fl) { fprintf(fl, "helpframe: yakalanan rect l=%.1f t=%.1f r=%.1f b=%.1f alpha=%d\n", rc.left, rc.top, rc.right, rc.bottom, (int)c.a); fclose(fl); }
+    }
     float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
     float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
     float area = (r - l) * (b - t);
@@ -464,12 +470,30 @@ static void TryInstallRectHook() {
             }
         }
     };
-    uintptr_t callees[128]; int nCallees = 0;
-    scan((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000, callees, nCallees, 128);
-    int level1 = nCallees;
-    for (int k = 0; k < level1; ++k) scan(callees[k], 0x400, nullptr, nCallees, 0);
+    // Genişlik öncelikli tarama: DrawHelpText -> alt fonksiyonlar -> onların alt fonksiyonları ... (en çok 4 seviye).
+    static uintptr_t fns[4096]; int nFns = 0;
+    int level1 = 0;
+    {
+        uintptr_t cur[128]; int nCur = 0;
+        scan((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000, cur, nCur, 128);
+        level1 = nCur;
+        for (int k = 0; k < nCur && nFns < 4096; ++k) fns[nFns++] = cur[k];
+    }
+    int levelStart = 0, levelEnd = nFns;
+    for (int depth = 2; depth <= 4; ++depth) {
+        for (int k = levelStart; k < levelEnd; ++k) {
+            uintptr_t cur[128]; int nCur = 0;
+            scan(fns[k], 0x400, cur, nCur, 128);
+            for (int j = 0; j < nCur && nFns < 4096; ++j) {
+                bool dup = false;
+                for (int q = 0; q < nFns; ++q) if (fns[q] == cur[j]) { dup = true; break; }
+                if (!dup) fns[nFns++] = cur[j];
+            }
+        }
+        levelStart = levelEnd; levelEnd = nFns;
+    }
     FILE* f = OpenLogAppend();
-    if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (alt fonksiyon sayisi %d; 0 ise cerceve cikmaz)\n", found, level1); fclose(f); }
+    if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (alt fonksiyon: ilk seviye %d, toplam %d; 0 ise cerceve cikmaz)\n", found, level1, nFns); fclose(f); }
 }
 
 static void __cdecl HookedDrawHelpText() {
