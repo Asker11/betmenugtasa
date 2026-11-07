@@ -526,7 +526,22 @@ static void FontBoxFrame(const CRect& rc, const CRGBA& c) {
     }
 }
 
+// Teşhis (Log=1): sol üst yardım bölgesindeki HER dikdörtgen (boyut ne olursa olsun) loglanır.
+static int g_regLogged = 0;
+static void LogRegionRect(const CRect& rc, const CRGBA& c, void* ret) {
+    if (g_regLogged >= 60) return;
+    const float sx = (float)RsGlobal.maximumWidth / 640.0f, sy = (float)RsGlobal.maximumHeight / 448.0f;
+    float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
+    float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
+    if (l > 140.0f * sx || t > 60.0f * sy || r < 10.0f * sx || b < 5.0f * sy) return;
+    if ((r - l) < 20.0f || (b - t) < 8.0f) return;
+    ++g_regLogged;
+    FILE* f = OpenLogAppend();
+    if (f) { fprintf(f, "helpframe: BOLGE rect inHelp=%d cagiran=%08X l=%.0f t=%.0f r=%.0f b=%.0f alpha=%d\n", (int)g_inHelp, (unsigned)(uintptr_t)ret, l, t, r, b, (int)c.a); fclose(f); }
+}
+
 static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
+    if (g_cfg.log) { __try { LogRegionRect(rc, c, _ReturnAddress()); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
     if (!g_inHelp && g_cfg.log) { __try { LogBigRect(rc, c, _ReturnAddress()); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
     if (g_inHelp) {
         __try { CaptureRect(rc, c); } __except (EXCEPTION_EXECUTE_HANDLER) {}
