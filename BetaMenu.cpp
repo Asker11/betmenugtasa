@@ -404,11 +404,16 @@ static DrawRectFn     g_origRect = nullptr;
 static bool  g_inHelp = false;
 static bool  g_haveRect = false;
 static float g_hl, g_ht, g_hr, g_hb;
+static float g_hArea = 0.0f;       // en büyük (arka plan) dikdörtgenin alanı
+static int   g_hAlpha = 255;       // o dikdörtgenin alfası (fade-out sırasında düşer)
+static int   g_hRefAlpha = 1;      // görülen en yüksek arka plan alfası (tam görünürlük referansı)
 
 static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
     if (g_inHelp) {
         float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
         float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
+        float area = (r - l) * (b - t);
+        if (area >= g_hArea) { g_hArea = area; g_hAlpha = c.a; }
         if (!g_haveRect) { g_hl = l; g_ht = t; g_hr = r; g_hb = b; g_haveRect = true; }
         else {
             if (l < g_hl) g_hl = l;
@@ -422,7 +427,7 @@ static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
 
 static void __cdecl HookedDrawHelpText() {
     if (!g_cfg.enabled || !g_cfg.helpFrame) { g_origHelp(); return; }
-    g_inHelp = true; g_haveRect = false;
+    g_inHelp = true; g_haveRect = false; g_hArea = 0.0f; g_hAlpha = 255;
     g_origHelp();
     g_inHelp = false;
     static int calls = 0;
@@ -433,9 +438,15 @@ static void __cdecl HookedDrawHelpText() {
     const CRGBA line((unsigned char)((g_cfg.lineColor >> 16) & 0xFF),
                      (unsigned char)((g_cfg.lineColor >> 8) & 0xFF),
                      (unsigned char)(g_cfg.lineColor & 0xFF), 255);
+    // Fade-out: kutunun arka plan alfası düştükçe çerçeve de aynı oranda solar.
+    if (g_hAlpha > g_hRefAlpha) g_hRefAlpha = g_hAlpha;
+    int fa = (g_hAlpha * 255) / (g_hRefAlpha > 0 ? g_hRefAlpha : 1);
+    if (fa > 255) fa = 255;
+    if (fa <= 0) return;
+    CRGBA lineF = line; lineF.a = (unsigned char)fa;
     const float fl = g_hl - th, ft = g_ht - th, fr = g_hr + th, fb = g_hb + th;
-    if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, 255));
-    FrameRect(fl, ft, fr, fb, th, line);
+    if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, (unsigned char)fa));
+    FrameRect(fl, ft, fr, fb, th, lineF);
     if (g_cfg.log) {
         FILE* f = OpenLogAppend();
         if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f\n", g_hl, g_ht, g_hr, g_hb); fclose(f); }
