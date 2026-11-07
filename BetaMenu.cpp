@@ -497,12 +497,42 @@ static void LogBigRect(const CRect& rc, const CRGBA& c, void* ret) {
     if (f) { fprintf(f, "helpframe: BUYUK rect cagiran=%08X l=%.0f t=%.0f r=%.0f b=%.0f alpha=%d\n", (unsigned)(uintptr_t)ret, rc.left, rc.top, rc.right, rc.bottom, (int)c.a); fclose(f); }
 }
 
+// Yardım kutusu çerçevesi (DrawHelpText'in dışında çizilen tek satırlık kutular için: "Use Videogame",
+// "Buy Drink", "Cheat activated" ...). Bu kutular CFont arka planı olarak 0x71A7EE'deki DrawRect çağrısından
+// çiziliyor (boxborder.asi de aynı yeri yamalıyor). Kutu çizildikten hemen sonra çerçeve çizilir; yazılar
+// sonra geldiği için çizginin üstünde kalır.
+static int g_fbRef = 1;
+static int g_fbLogged = 0;
+static void FontBoxFrame(const CRect& rc, const CRGBA& c) {
+    if (!g_cfg.enabled || !g_cfg.helpFrame) return;
+    const float sx = (float)RsGlobal.maximumWidth / 640.0f, sy = (float)RsGlobal.maximumHeight / 448.0f;
+    float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
+    float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
+    // Sadece sol üstteki yardım kutusu bölgesi (22.1, 21.9 sanal birim) ve yeterince geniş kutular.
+    if (l < 17.0f * sx || l > 27.0f * sx || t < 17.0f * sy || t > 27.0f * sy || (r - l) < 150.0f * sx) return;
+    int a = c.a;
+    if (a > g_fbRef) g_fbRef = a;
+    int fa = (a * 255) / (g_fbRef > 0 ? g_fbRef : 1);
+    if (fa <= 0) return; if (fa > 255) fa = 255;
+    const float th = g_cfg.helpFrameTh * sy, ot = g_cfg.helpOutline * sy, ck = g_cfg.cornerCut * sy;
+    CRGBA line((unsigned char)((g_cfg.lineColor >> 16) & 0xFF), (unsigned char)((g_cfg.lineColor >> 8) & 0xFF),
+               (unsigned char)(g_cfg.lineColor & 0xFF), (unsigned char)fa);
+    if (ot > 0.0f) ChamferOutline(l - th, t - th, r + th, b + th, ot, ck, CRGBA(0, 0, 0, (unsigned char)fa));
+    ChamferFrame(l - th, t - th, r + th, b + th, th, ck, line);
+    if (g_fbLogged < 5) {
+        ++g_fbLogged;
+        FILE* f = OpenLogAppend();
+        if (f) { fprintf(f, "helpframe: font kutusu cerceveli l=%.0f t=%.0f r=%.0f b=%.0f alpha=%d\n", l, t, r, b, a); fclose(f); }
+    }
+}
+
 static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
     if (!g_inHelp && g_cfg.log) { __try { LogBigRect(rc, c, _ReturnAddress()); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
     if (g_inHelp) {
         __try { CaptureRect(rc, c); } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
     g_origRect(rc, c);
+    if (!g_inHelp) { __try { FontBoxFrame(rc, c); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
 }
 
 // Stats paneli (Tab): kutu 0x573EF4'teki "call DrawRect" ile çiziliyor (loglardan bulundu, SA 1.0 US).
