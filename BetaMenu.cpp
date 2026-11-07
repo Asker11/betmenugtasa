@@ -72,6 +72,7 @@ struct Config {
     bool  helpFrame   = false;
     float helpFrameTh = 2.0f;  // beyaz çizgi kalınlığı (sanal birim)
     float helpOutline = 2.0f;  // dış siyah kontur (sanal birim)
+    float cornerCut   = 1.5f;  // çizgi köşelerinin yassılığı (sanal birim, 0 = dik köşe)
     bool  statsFrame  = false; // Tab ile açılan Stats paneli için çerçeve (kalınlık: HelpBox ayarları)
 };
 static Config g_cfg;
@@ -130,6 +131,7 @@ static void LoadConfig() {
     g_cfg.ornOutline = ReadF("OrnamentOutline", d.ornOutline, ini);
     g_cfg.helpFrame   = ReadB("HelpBoxFrame", d.helpFrame, ini);
     g_cfg.statsFrame  = ReadB("StatsBoxFrame", d.statsFrame, ini);
+    g_cfg.cornerCut   = ReadF("CornerCut", d.cornerCut, ini);
     g_cfg.helpFrameTh = ReadF("HelpBoxFrameThickness", d.helpFrameTh, ini);
     g_cfg.helpOutline = ReadF("HelpBoxOutlineThickness", d.helpOutline, ini);
 }
@@ -145,6 +147,43 @@ static void FrameRect(float l, float t, float r, float b, float th, const CRGBA&
     Rect(l, b - th, r, b, c);
     Rect(l, t, l + th, b, c);
     Rect(r - th, t, r, b, c);
+}
+
+// Köşeleri yassı (pah kırılmış) çerçeve. k = köşe kesiği (piksel). k<2 ise düz FrameRect.
+// Çizgi kalınlığı th; köşelerde 45 derecelik basamaklı çizgi (1 piksel yüksekliğinde satırlar) çizilir.
+static void ChamferFrame(float l, float t, float r, float b, float th, float k, const CRGBA& c) {
+    int n = (int)(k + 0.5f);
+    if (n < 2) { FrameRect(l, t, r, b, th, c); return; }
+    float kk = (float)n;
+    Rect(l + kk, t, r - kk, t + th, c);          // üst
+    Rect(l + kk, b - th, r - kk, b, c);          // alt
+    Rect(l, t + kk, l + th, b - kk, c);          // sol
+    Rect(r - th, t + kk, r, b - kk, c);          // sağ
+    for (int i = 0; i < n; ++i) {
+        float f = (float)i;
+        Rect(l + kk - f,       t + f,       l + kk - f + th, t + f + 1.0f, c);   // sol üst
+        Rect(r - kk + f - th,  t + f,       r - kk + f,      t + f + 1.0f, c);   // sağ üst
+        Rect(l + kk - f,       b - f - 1.0f, l + kk - f + th, b - f,         c);  // sol alt
+        Rect(r - kk + f - th,  b - f - 1.0f, r - kk + f,      b - f,         c);  // sağ alt
+    }
+}
+
+// Çizginin DIŞINA siyah kontur (ot piksel). (l,t,r,b) beyaz çerçevenin dış kenarı, k beyazın köşe kesiği.
+static void ChamferOutline(float l, float t, float r, float b, float ot, float k, const CRGBA& c) {
+    int n = (int)(k + 0.5f);
+    if (n < 2) { FrameRect(l - ot, t - ot, r + ot, b + ot, ot, c); return; }
+    float kk = (float)n;
+    Rect(l + kk - ot, t - ot, r - kk + ot, t, c);   // üst
+    Rect(l + kk - ot, b, r - kk + ot, b + ot, c);   // alt
+    Rect(l - ot, t + kk - ot, l, b - kk + ot, c);   // sol
+    Rect(r, t + kk - ot, r + ot, b - kk + ot, c);   // sağ
+    for (int i = 0; i < n; ++i) {
+        float f = (float)i;
+        Rect(l + kk - f - ot, t + f,         l + kk - f,       t + f + 1.0f, c);
+        Rect(r - kk + f,      t + f,         r - kk + f + ot,  t + f + 1.0f, c);
+        Rect(l + kk - f - ot, b - f - 1.0f,  l + kk - f,       b - f,        c);
+        Rect(r - kk + f,      b - f - 1.0f,  r - kk + f + ot,  b - f,        c);
+    }
 }
 
 // Beta ekran görüntüsündeki alt süs: ortada ince çizgi, iki uçta kıvrım benzeri yığılmış bloklar,
@@ -359,9 +398,10 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     const float fl = l - gap - th, ft = t - gap - th, fr = r + gap + th, fb = b + gap + th;
     // Önce siyah kontur (beyaz çizginin hemen dışında), sonra beyaz çizgi.
     const float ot = g_cfg.outline * sy;
+    const float ck = g_cfg.cornerCut * sy;
     if (ot > 0.0f)
-        FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, 255));
-    FrameRect(fl, ft, fr, fb, th, white);
+        ChamferOutline(fl, ft, fr, fb, ot, ck, CRGBA(0, 0, 0, 255));
+    ChamferFrame(fl, ft, fr, fb, th, ck, white);
 
     // 3) Orijinal kod: panel, "Tattoo" başlığı, yazılar, fiyatlar, seçim vurgusu.
     //    m_bColumnBackground'a DOKUNMUYORUZ (kapatınca yazılar bozuluyordu).
@@ -471,8 +511,9 @@ static void __cdecl HookedStatsRect(const CRect& rc, const CRGBA& c) {
     const float th = g_cfg.helpFrameTh * sy, ot = g_cfg.helpOutline * sy;
     CRGBA line((unsigned char)((g_cfg.lineColor >> 16) & 0xFF), (unsigned char)((g_cfg.lineColor >> 8) & 0xFF),
                (unsigned char)(g_cfg.lineColor & 0xFF), (unsigned char)fa);
-    if (ot > 0.0f) FrameRect(l - th - ot, t - th - ot, r + th + ot, b + th + ot, ot, CRGBA(0, 0, 0, (unsigned char)fa));
-    FrameRect(l - th, t - th, r + th, b + th, th, line);
+    const float ck = g_cfg.cornerCut * sy;
+    if (ot > 0.0f) ChamferOutline(l - th, t - th, r + th, b + th, ot, ck, CRGBA(0, 0, 0, (unsigned char)fa));
+    ChamferFrame(l - th, t - th, r + th, b + th, th, ck, line);
 }
 
 static void PatchStatsCall() {
@@ -599,8 +640,9 @@ static void __cdecl HookedDrawHelpText() {
     if (fa <= 0) return;
     CRGBA lineF = line; lineF.a = (unsigned char)fa;
     const float fl = g_hl - th, ft = g_ht - th, fr = g_hr + th, fb = g_hb + th;
-    if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, (unsigned char)fa));
-    FrameRect(fl, ft, fr, fb, th, lineF);
+    const float ck = g_cfg.cornerCut * sy;
+    if (ot > 0.0f) ChamferOutline(fl, ft, fr, fb, ot, ck, CRGBA(0, 0, 0, (unsigned char)fa));
+    ChamferFrame(fl, ft, fr, fb, th, ck, lineF);
     static int helpLogged = 0;
     if (helpLogged < 150) {   // sadece kutu değişince yaz (en çok 150 satır; Log ayarından bağımsız) (her kare yazmak logu şişiriyordu)
         static float ll = 0, lt = 0, lr = 0, lb = 0;
