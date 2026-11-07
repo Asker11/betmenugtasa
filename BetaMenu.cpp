@@ -66,6 +66,11 @@ struct Config {
     float ornX       = 11.0f;  // süsü kenarlardan DIŞARI kaydır (+ dışarı, - içeri)
     float ornY       = 0.0f;   // süsü aşağı kaydır (+ aşağı, - yukarı)
     float ornOutline = 1.0f;   // süsün etrafına eklenen ekstra siyah kontur (sanal birim, 0 = yok)
+
+    // Sol üstteki yardım kutuları (ornamentsiz çerçeve). Varsayılan KAPALI = oyunun orijinal görünümü.
+    bool  helpFrame   = false;
+    float helpFrameTh = 2.0f;  // beyaz çizgi kalınlığı (sanal birim)
+    float helpOutline = 2.0f;  // dış siyah kontur (sanal birim)
 };
 static Config g_cfg;
 
@@ -121,6 +126,9 @@ static void LoadConfig() {
     g_cfg.ornX     = ReadF("OrnamentOffsetX", d.ornX, ini);
     g_cfg.ornY     = ReadF("OrnamentOffsetY", d.ornY, ini);
     g_cfg.ornOutline = ReadF("OrnamentOutline", d.ornOutline, ini);
+    g_cfg.helpFrame   = ReadB("HelpBoxFrame", d.helpFrame, ini);
+    g_cfg.helpFrameTh = ReadF("HelpBoxFrameThickness", d.helpFrameTh, ini);
+    g_cfg.helpOutline = ReadF("HelpBoxOutlineThickness", d.helpOutline, ini);
 }
 
 // ---------------------------------------------------------------- çizim yardımcıları
@@ -371,11 +379,74 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
     }
 }
 
+// ---------------------------------------------------------------- yardım kutusu çerçevesi
+// CHud::DrawHelpText sırasında çağrılan CSprite2d::DrawRect çağrılarının sınırlayıcı kutusu yakalanır,
+// yardım metni bitince bu kutunun DIŞINA siyah kontur + LineColor çizgi çizilir (süs yok).
+// Adresler (SA 1.0 US) derleme sırasında plugin-sdk'dan çıkarılıp /D ile verilir; yoksa bunlar kullanılır.
+#ifndef BM_ADDR_DRAWHELPTEXT
+#define BM_ADDR_DRAWHELPTEXT 0x58B6E0
+#endif
+#ifndef BM_ADDR_DRAWRECT
+#define BM_ADDR_DRAWRECT 0x727B60
+#endif
+typedef void(__cdecl* DrawHelpTextFn)();
+typedef void(__cdecl* DrawRectFn)(const CRect&, const CRGBA&);
+static DrawHelpTextFn g_origHelp = nullptr;
+static DrawRectFn     g_origRect = nullptr;
+static bool  g_inHelp = false;
+static bool  g_haveRect = false;
+static float g_hl, g_ht, g_hr, g_hb;
+
+static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
+    if (g_inHelp) {
+        float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
+        float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
+        if (!g_haveRect) { g_hl = l; g_ht = t; g_hr = r; g_hb = b; g_haveRect = true; }
+        else {
+            if (l < g_hl) g_hl = l;
+            if (t < g_ht) g_ht = t;
+            if (r > g_hr) g_hr = r;
+            if (b > g_hb) g_hb = b;
+        }
+    }
+    g_origRect(rc, c);
+}
+
+static void __cdecl HookedDrawHelpText() {
+    if (!g_cfg.enabled || !g_cfg.helpFrame) { g_origHelp(); return; }
+    g_inHelp = true; g_haveRect = false;
+    g_origHelp();
+    g_inHelp = false;
+    if (!g_haveRect) return;
+    const float sy = (float)RsGlobal.maximumHeight / 448.0f;
+    const float th = g_cfg.helpFrameTh * sy, ot = g_cfg.helpOutline * sy;
+    const CRGBA line((unsigned char)((g_cfg.lineColor >> 16) & 0xFF),
+                     (unsigned char)((g_cfg.lineColor >> 8) & 0xFF),
+                     (unsigned char)(g_cfg.lineColor & 0xFF), 255);
+    const float fl = g_hl - th, ft = g_ht - th, fr = g_hr + th, fb = g_hb + th;
+    if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, 255));
+    FrameRect(fl, ft, fr, fb, th, line);
+    if (g_cfg.log) {
+        FILE* f = fopen("BetaMenu.log", "a");
+        if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f\n", g_hl, g_ht, g_hr, g_hb); fclose(f); }
+    }
+}
+
 static void InstallHook() {
     if (MH_Initialize() != MH_OK) return;
     LPVOID target = (LPVOID)0x580E00; // CMenuSystem::DisplayStandardMenu (1.0 US)
-    if (MH_CreateHook(target, (LPVOID)&HookedDisplayStandardMenu, (LPVOID*)&g_origDisplay) != MH_OK) return;
-    MH_EnableHook(target);
+    if (MH_CreateHook(target, (LPVOID)&HookedDisplayStandardMenu, (LPVOID*)&g_origDisplay) == MH_OK)
+        MH_EnableHook(target);
+
+    // Yardım kutusu çerçevesi: sadece ini'de HelpBoxFrame=1 ise kurulur (kapalıyken oyuna hiç dokunmaz).
+    if (g_cfg.helpFrame) {
+        LPVOID tr = (LPVOID)BM_ADDR_DRAWRECT, th = (LPVOID)BM_ADDR_DRAWHELPTEXT;
+        if (MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect) == MH_OK &&
+            MH_CreateHook(th, (LPVOID)&HookedDrawHelpText, (LPVOID*)&g_origHelp) == MH_OK) {
+            MH_EnableHook(tr);
+            MH_EnableHook(th);
+        }
+    }
 }
 
 // ---------------------------------------------------------------- plugin girişi
