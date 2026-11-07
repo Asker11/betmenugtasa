@@ -408,19 +408,23 @@ static float g_hArea = 0.0f;       // en büyük (arka plan) dikdörtgenin alan�
 static int   g_hAlpha = 255;       // o dikdörtgenin alfası (fade-out sırasında düşer)
 static int   g_hRefAlpha = 1;      // görülen en yüksek arka plan alfası (tam görünürlük referansı)
 
+static void CaptureRect(const CRect& rc, const CRGBA& c) {
+    float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
+    float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
+    float area = (r - l) * (b - t);
+    if (area >= g_hArea) { g_hArea = area; g_hAlpha = c.a; }
+    if (!g_haveRect) { g_hl = l; g_ht = t; g_hr = r; g_hb = b; g_haveRect = true; }
+    else {
+        if (l < g_hl) g_hl = l;
+        if (t < g_ht) g_ht = t;
+        if (r > g_hr) g_hr = r;
+        if (b > g_hb) g_hb = b;
+    }
+}
+
 static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
     if (g_inHelp) {
-        float l = rc.left < rc.right ? rc.left : rc.right,  r = rc.left < rc.right ? rc.right : rc.left;
-        float t = rc.top < rc.bottom ? rc.top : rc.bottom,  b = rc.top < rc.bottom ? rc.bottom : rc.top;
-        float area = (r - l) * (b - t);
-        if (area >= g_hArea) { g_hArea = area; g_hAlpha = c.a; }
-        if (!g_haveRect) { g_hl = l; g_ht = t; g_hr = r; g_hb = b; g_haveRect = true; }
-        else {
-            if (l < g_hl) g_hl = l;
-            if (t < g_ht) g_ht = t;
-            if (r > g_hr) g_hr = r;
-            if (b > g_hb) g_hb = b;
-        }
+        __try { CaptureRect(rc, c); } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
     g_origRect(rc, c);
 }
@@ -428,6 +432,8 @@ static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
 static void __cdecl HookedDrawHelpText() {
     if (!g_cfg.enabled || !g_cfg.helpFrame) { g_origHelp(); return; }
     g_inHelp = true; g_haveRect = false; g_hArea = 0.0f; g_hAlpha = 255;
+    static int enters = 0;
+    if (enters < 3) { ++enters; FILE* fe = OpenLogAppend(); if (fe) { fprintf(fe, "helpframe: DrawHelpText'e giriliyor (%d)\n", enters); fclose(fe); } }
     g_origHelp();
     g_inHelp = false;
     static int calls = 0;
@@ -447,9 +453,13 @@ static void __cdecl HookedDrawHelpText() {
     const float fl = g_hl - th, ft = g_ht - th, fr = g_hr + th, fb = g_hb + th;
     if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, (unsigned char)fa));
     FrameRect(fl, ft, fr, fb, th, lineF);
-    if (g_cfg.log) {
-        FILE* f = OpenLogAppend();
-        if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f\n", g_hl, g_ht, g_hr, g_hb); fclose(f); }
+    if (g_cfg.log) {   // sadece kutu değişince yaz (her kare yazmak logu şişiriyordu)
+        static float ll = 0, lt = 0, lr = 0, lb = 0;
+        if (g_hl != ll || g_ht != lt || g_hr != lr || g_hb != lb) {
+            ll = g_hl; lt = g_ht; lr = g_hr; lb = g_hb;
+            FILE* f = OpenLogAppend();
+            if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f alpha=%d ref=%d\n", g_hl, g_ht, g_hr, g_hb, g_hAlpha, g_hRefAlpha); fclose(f); }
+        }
     }
 }
 
