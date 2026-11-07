@@ -557,7 +557,7 @@ static void TryInstallRectHook() {
         int all = 0;
         for (uintptr_t a = 0x401000; a < 0x85F000; ++a) {
             unsigned char* p = (unsigned char*)a;
-            if (p[0] != 0xE8) continue;
+            if (p[0] != 0xE8 && p[0] != 0xE9) continue;   // call ve kuyruk-atlaması (jmp) ile DrawRect'e gidenler
             if ((uintptr_t)(p + 5) + (uintptr_t)*(int*)(p + 1) != (uintptr_t)BM_ADDR_DRAWRECT) continue;
             DWORD old = 0;
             if (!VirtualProtect(p + 1, 4, PAGE_EXECUTE_READWRITE, &old)) continue;
@@ -565,6 +565,8 @@ static void TryInstallRectHook() {
             VirtualProtect(p + 1, 4, old, &old);
             FlushInstructionCache(GetCurrentProcess(), p, 5);
             ++all;
+            FILE* fs = OpenLogAppend();
+            if (fs) { fprintf(fs, "helpframe: tum tarama: %s yeri %08X\n", p[0] == 0xE9 ? "JMP" : "call", (unsigned)a); fclose(fs); }
         }
         FILE* fa = OpenLogAppend();
         if (fa) { fprintf(fa, "helpframe: tum exe taramasi: %d call yeri daha yamalandi\n", all); fclose(fa); }
@@ -622,7 +624,7 @@ static void InstallHook() {
         // Tanı: adresler ve ilk baytlar BetaMenu.log'a yazılır (çökme olursa nedenini görmek için).
         FILE* f = OpenLogAppend();
         if (f) {
-            fprintf(f, "helpframe: DrawRect=%p DrawHelpText=%p\n", tr, th);
+            fprintf(f, "helpframe: DrawRect=%p DrawHelpText=%p ayarlar: enabled=%d HelpBoxFrame=%d StatsBoxFrame=%d Log=%d\n", tr, th, (int)g_cfg.enabled, (int)g_cfg.helpFrame, (int)g_cfg.statsFrame, (int)g_cfg.log);
             const unsigned char* a = (const unsigned char*)tr; const unsigned char* b = (const unsigned char*)th;
             fprintf(f, "  DrawRect bytes: "); for (int i = 0; i < 8; ++i) fprintf(f, "%02X ", a[i]);
             fprintf(f, "\n  DrawHelpText bytes: "); for (int i = 0; i < 8; ++i) fprintf(f, "%02X ", b[i]);
