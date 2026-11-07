@@ -20,6 +20,7 @@
 #include "ornament_data.h"   // süs dokusu (sol/sağ yarı), .asi içine gömülü
 
 #include <windows.h>
+#include <intrin.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -428,7 +429,21 @@ static void CaptureRect(const CRect& rc, const CRGBA& c) {
     }
 }
 
+static void LogBigRect(const CRect& rc, const CRGBA& c, void* ret) {
+    static unsigned seen[256]; static int n = 0;
+    float w = rc.right - rc.left; if (w < 0) w = -w;
+    float h = rc.bottom - rc.top; if (h < 0) h = -h;
+    if (w < 150.0f || h < 100.0f) return;
+    unsigned key = (unsigned)(uintptr_t)ret ^ ((unsigned)(int)rc.left * 31u) ^ ((unsigned)(int)rc.top * 17u);
+    for (int i = 0; i < n; ++i) if (seen[i] == key) return;
+    if (n >= 256) return;
+    seen[n++] = key;
+    FILE* f = OpenLogAppend();
+    if (f) { fprintf(f, "helpframe: BUYUK rect cagiran=%08X l=%.0f t=%.0f r=%.0f b=%.0f alpha=%d\n", (unsigned)(uintptr_t)ret, rc.left, rc.top, rc.right, rc.bottom, (int)c.a); fclose(f); }
+}
+
 static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
+    if (!g_inHelp && g_cfg.log) { __try { LogBigRect(rc, c, _ReturnAddress()); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
     if (g_inHelp) {
         __try { CaptureRect(rc, c); } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
@@ -470,28 +485,32 @@ static void TryInstallRectHook() {
             }
         }
     };
-    // Genişlik öncelikli tarama: DrawHelpText -> alt fonksiyonlar -> onların alt fonksiyonları ... (en çok 4 seviye).
+    // Genişlik öncelikli tarama: kök -> alt fonksiyonlar -> ... (en çok 4 seviye).
     static uintptr_t fns[4096]; int nFns = 0;
     int level1 = 0;
-    {
+    auto bfs = [&](uintptr_t root, int rootLen) {
         uintptr_t cur[128]; int nCur = 0;
-        scan((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000, cur, nCur, 128);
-        level1 = nCur;
+        scan(root, rootLen, cur, nCur, 128);
+        int start = nFns;
         for (int k = 0; k < nCur && nFns < 4096; ++k) fns[nFns++] = cur[k];
-    }
-    int levelStart = 0, levelEnd = nFns;
-    for (int depth = 2; depth <= 4; ++depth) {
-        for (int k = levelStart; k < levelEnd; ++k) {
-            uintptr_t cur[128]; int nCur = 0;
-            scan(fns[k], 0x400, cur, nCur, 128);
-            for (int j = 0; j < nCur && nFns < 4096; ++j) {
-                bool dup = false;
-                for (int q = 0; q < nFns; ++q) if (fns[q] == cur[j]) { dup = true; break; }
-                if (!dup) fns[nFns++] = cur[j];
+        int levelStart = start, levelEnd = nFns;
+        for (int depth = 2; depth <= 4; ++depth) {
+            for (int k = levelStart; k < levelEnd; ++k) {
+                uintptr_t c2[128]; int n2 = 0;
+                scan(fns[k], 0x400, c2, n2, 128);
+                for (int j = 0; j < n2 && nFns < 4096; ++j) {
+                    bool dup = false;
+                    for (int q = 0; q < nFns; ++q) if (fns[q] == c2[j]) { dup = true; break; }
+                    if (!dup) fns[nFns++] = c2[j];
+                }
             }
+            levelStart = levelEnd; levelEnd = nFns;
         }
-        levelStart = levelEnd; levelEnd = nFns;
-    }
+        return nCur;
+    };
+    level1 = bfs((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000);
+    // Keşif: Log=1 iken CHud::Draw'dan (0x58FAE0, doğrulanmadı) da taranır; büyük kutuların çağıranı loglanır.
+    if (g_cfg.log) bfs((uintptr_t)0x58FAE0, 0x1000);
     FILE* f = OpenLogAppend();
     if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (alt fonksiyon: ilk seviye %d, toplam %d; 0 ise cerceve cikmaz)\n", found, level1, nFns); fclose(f); }
 }
