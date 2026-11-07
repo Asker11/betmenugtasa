@@ -441,6 +441,21 @@ static void InstallHook() {
     // Yardım kutusu çerçevesi: sadece ini'de HelpBoxFrame=1 ise kurulur (kapalıyken oyuna hiç dokunmaz).
     if (g_cfg.helpFrame) {
         LPVOID tr = (LPVOID)BM_ADDR_DRAWRECT, th = (LPVOID)BM_ADDR_DRAWHELPTEXT;
+        // Tanı: adresler ve ilk baytlar BetaMenu.log'a yazılır (çökme olursa nedenini görmek için).
+        FILE* f = fopen("BetaMenu.log", "a");
+        if (f) {
+            fprintf(f, "helpframe: DrawRect=%p DrawHelpText=%p\n", tr, th);
+            const unsigned char* a = (const unsigned char*)tr; const unsigned char* b = (const unsigned char*)th;
+            fprintf(f, "  DrawRect bytes: "); for (int i = 0; i < 8; ++i) fprintf(f, "%02X ", a[i]);
+            fprintf(f, "\n  DrawHelpText bytes: "); for (int i = 0; i < 8; ++i) fprintf(f, "%02X ", b[i]);
+            fprintf(f, "\n"); fclose(f);
+        }
+        // Sadece geleneksel prologlar (push ebp / sub esp / push reg / mov) kabul edilir; aksi halde kurma.
+        auto plausible = [](const unsigned char* p) {
+            return p[0] == 0x55 || p[0] == 0x83 || p[0] == 0x81 || p[0] == 0x6A || p[0] == 0x64 ||
+                   p[0] == 0x56 || p[0] == 0x53 || p[0] == 0x51 || p[0] == 0x8B || p[0] == 0xA1 || p[0] == 0xD9;
+        };
+        if (!plausible((const unsigned char*)tr) || !plausible((const unsigned char*)th)) return;
         if (MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect) == MH_OK &&
             MH_CreateHook(th, (LPVOID)&HookedDrawHelpText, (LPVOID*)&g_origHelp) == MH_OK) {
             MH_EnableHook(tr);
