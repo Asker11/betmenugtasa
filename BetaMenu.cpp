@@ -435,7 +435,7 @@ static void LogBigRect(const CRect& rc, const CRGBA& c, void* ret) {
     static unsigned seen[256]; static int n = 0;
     float w = rc.right - rc.left; if (w < 0) w = -w;
     float h = rc.bottom - rc.top; if (h < 0) h = -h;
-    if (w < 150.0f || h < 100.0f) return;
+    if (w < 150.0f || h < 40.0f) return;   // 40: tek satırlık küçük kutular (ör. Cheat activated) da görünsün
     unsigned key = (unsigned)(uintptr_t)ret ^ ((unsigned)(int)rc.left * 31u) ^ ((unsigned)(int)rc.top * 17u);
     for (int i = 0; i < n; ++i) if (seen[i] == key) return;
     if (n >= 256) return;
