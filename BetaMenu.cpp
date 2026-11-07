@@ -582,12 +582,13 @@ static void __cdecl HookedDrawHelpText() {
     const float fl = g_hl - th, ft = g_ht - th, fr = g_hr + th, fb = g_hb + th;
     if (ot > 0.0f) FrameRect(fl - ot, ft - ot, fr + ot, fb + ot, ot, CRGBA(0, 0, 0, (unsigned char)fa));
     FrameRect(fl, ft, fr, fb, th, lineF);
-    if (g_cfg.log) {   // sadece kutu değişince yaz (her kare yazmak logu şişiriyordu)
+    static int helpLogged = 0;
+    if (helpLogged < 150) {   // sadece kutu değişince yaz (en çok 150 satır; Log ayarından bağımsız) (her kare yazmak logu şişiriyordu)
         static float ll = 0, lt = 0, lr = 0, lb = 0;
         if (g_hl != ll || g_ht != lt || g_hr != lr || g_hb != lb) {
-            ll = g_hl; lt = g_ht; lr = g_hr; lb = g_hb;
+            ll = g_hl; lt = g_ht; lr = g_hr; lb = g_hb; ++helpLogged;
             FILE* f = OpenLogAppend();
-            if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f alpha=%d ref=%d\n", g_hl, g_ht, g_hr, g_hb, g_hAlpha, g_hRefAlpha); fclose(f); }
+            if (f) { fprintf(f, "help rect l=%.1f t=%.1f r=%.1f b=%.1f alpha=%d ref=%d fa=%d\n", g_hl, g_ht, g_hr, g_hb, g_hAlpha, g_hRefAlpha, fa); fclose(f); }
         }
     }
 }
