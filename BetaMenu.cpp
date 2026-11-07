@@ -34,6 +34,7 @@ struct Config {
     bool  hideOriginalBackground = false;
     bool  ornament               = true;
     bool  log                    = false;   // tanı logu (BetaMenu.log)
+    unsigned lineColor           = 0xE1E1E1; // çerçeve çizgisi ve süs rengi (RRGGBB)
 
     // Kutu, orijinal panelle AYNI ölçüde. Orijinal panel (1920x1080 ekran görüntüsünden ölçüldü):
     //   sol kenar = posX, üst kenar = posY, genişlik = sütun toplamı + 44 px (=14.67 sanal),
@@ -95,6 +96,13 @@ static void LoadConfig() {
     g_cfg.hideOriginalBackground = ReadB("HideOriginalBackground", d.hideOriginalBackground, ini);
     g_cfg.ornament               = ReadB("Ornament", d.ornament, ini);
     g_cfg.log                    = ReadB("Log", d.log, ini);
+    {
+        // LineColor=E1E1E1 (başında # olabilir)
+        char buf[16] = {};
+        GetPrivateProfileStringA("BetaMenu", "LineColor", "E1E1E1", buf, sizeof(buf), ini.c_str());
+        const char* s = (buf[0] == '#') ? buf + 1 : buf;
+        g_cfg.lineColor = (unsigned)strtoul(s, nullptr, 16) & 0xFFFFFF;
+    }
     g_cfg.offsetX  = ReadF("OffsetX", d.offsetX, ini);
     g_cfg.offsetY  = ReadF("OffsetY", d.offsetY, ini);
     g_cfg.extraW   = ReadF("ExtraWidth", d.extraW, ini);
@@ -321,7 +329,11 @@ static void __cdecl HookedDisplayStandardMenu(unsigned char panelId, bool bright
         LogPanel(panelId, p, sx, sy, width, l, t, r, b);
 
     const CRGBA black(0, 0, 0, (unsigned char)g_cfg.alpha);
-    const CRGBA white(255, 255, 255, 255);
+    // "white" adı eski kaldı; renk artık ini'deki LineColor (varsayılan #E1E1E1). Süs dokusunun beyaz
+    // dolgusu bu renkle çarpıldığı için aynı renge döner, siyah kontur siyah kalır.
+    const CRGBA white((unsigned char)((g_cfg.lineColor >> 16) & 0xFF),
+                      (unsigned char)((g_cfg.lineColor >> 8) & 0xFF),
+                      (unsigned char)(g_cfg.lineColor & 0xFF), 255);
 
     // 1) Siyah kutu: orijinal panelle aynı ölçüde, orijinalin ALTINA çizilir.
     Rect(l, t, r, b, black);
