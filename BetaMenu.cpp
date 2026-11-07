@@ -429,8 +429,24 @@ static void __cdecl HookedDrawRect(const CRect& rc, const CRGBA& c) {
     g_origRect(rc, c);
 }
 
+// DrawRect başka bir mod tarafından da yamalı (ilk bayt E9) ve oyun açılışında/yükleme ekranında çok çağrılıyor.
+// Bu yüzden DrawRect hook'unu açılışta değil, oyun içinde yardım metni ~120 kez çizildikten SONRA kuruyoruz
+// (diğer modların yüklenmesi bitmiş olur, yükleme ekranı geçilmiş olur).
+static void TryInstallRectHook() {
+    static bool tried = false;
+    static int frames = 0;
+    if (tried || ++frames < 120) return;
+    tried = true;
+    LPVOID tr = (LPVOID)BM_ADDR_DRAWRECT;
+    MH_STATUS s1 = MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect);
+    MH_STATUS s2 = (s1 == MH_OK) ? MH_EnableHook(tr) : s1;
+    FILE* f = OpenLogAppend();
+    if (f) { fprintf(f, "helpframe: DrawRect hook (gec kurulum) status: %d %d\n", (int)s1, (int)s2); fclose(f); }
+}
+
 static void __cdecl HookedDrawHelpText() {
     if (!g_cfg.enabled || !g_cfg.helpFrame) { g_origHelp(); return; }
+    TryInstallRectHook();
     g_inHelp = true; g_haveRect = false; g_hArea = 0.0f; g_hAlpha = 255;
     static int enters = 0;
     if (enters < 3) { ++enters; FILE* fe = OpenLogAppend(); if (fe) { fprintf(fe, "helpframe: DrawHelpText'e giriliyor (%d)\n", enters); fclose(fe); } }
@@ -491,10 +507,9 @@ static void InstallHook() {
             if (f3) { fprintf(f3, "helpframe: adres gecersiz gorunuyor, kurulmadi\n"); fclose(f3); }
             return;
         }
-        MH_STATUS s1 = MH_CreateHook(tr, (LPVOID)&HookedDrawRect, (LPVOID*)&g_origRect);
-        MH_STATUS s2 = (s1 == MH_OK) ? MH_CreateHook(th, (LPVOID)&HookedDrawHelpText, (LPVOID*)&g_origHelp) : s1;
-        MH_STATUS s3 = (s2 == MH_OK) ? MH_EnableHook(tr) : s2;
-        MH_STATUS s4 = (s3 == MH_OK) ? MH_EnableHook(th) : s3;
+        MH_STATUS s1 = MH_CreateHook(th, (LPVOID)&HookedDrawHelpText, (LPVOID*)&g_origHelp);
+        MH_STATUS s2 = (s1 == MH_OK) ? MH_EnableHook(th) : s1;
+        MH_STATUS s3 = MH_OK, s4 = MH_OK;
         FILE* f2 = OpenLogAppend();
         if (f2) { fprintf(f2, "helpframe hook status: %d %d %d %d (0 = tamam)\n", (int)s1, (int)s2, (int)s3, (int)s4); fclose(f2); }
     }
