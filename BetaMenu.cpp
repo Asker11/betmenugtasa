@@ -168,21 +168,20 @@ static void ChamferFrame(float l, float t, float r, float b, float th, float k, 
     }
 }
 
-// Çizginin DIŞINA siyah kontur (ot piksel). (l,t,r,b) beyaz çerçevenin dış kenarı, k beyazın köşe kesiği.
+// Çizginin DIŞINA siyah kontur (ot piksel). Siyah kontur DİK köşeli kalır (orijinal beta'daki gibi);
+// beyaz çizginin yassı köşesinin açtığı üçgen boşluk da siyahla doldurulur.
+// (l,t,r,b) beyaz çerçevenin dış kenarı, k beyazın köşe kesiği.
 static void ChamferOutline(float l, float t, float r, float b, float ot, float k, const CRGBA& c) {
+    FrameRect(l - ot, t - ot, r + ot, b + ot, ot, c);
     int n = (int)(k + 0.5f);
-    if (n < 2) { FrameRect(l - ot, t - ot, r + ot, b + ot, ot, c); return; }
+    if (n < 2) return;
     float kk = (float)n;
-    Rect(l + kk - ot, t - ot, r - kk + ot, t, c);   // üst
-    Rect(l + kk - ot, b, r - kk + ot, b + ot, c);   // alt
-    Rect(l - ot, t + kk - ot, l, b - kk + ot, c);   // sol
-    Rect(r, t + kk - ot, r + ot, b - kk + ot, c);   // sağ
     for (int i = 0; i < n; ++i) {
-        float f = (float)i;
-        Rect(l + kk - f - ot, t + f,         l + kk - f,       t + f + 1.0f, c);
-        Rect(r - kk + f,      t + f,         r - kk + f + ot,  t + f + 1.0f, c);
-        Rect(l + kk - f - ot, b - f - 1.0f,  l + kk - f,       b - f,        c);
-        Rect(r - kk + f,      b - f - 1.0f,  r - kk + f + ot,  b - f,        c);
+        float f = (float)i, w = kk - f;                 // satır i'de kesilen genişlik
+        Rect(l,      t + f,        l + w, t + f + 1.0f, c);   // sol üst
+        Rect(r - w,  t + f,        r,     t + f + 1.0f, c);   // sağ üst
+        Rect(l,      b - f - 1.0f, l + w, b - f,        c);   // sol alt
+        Rect(r - w,  b - f - 1.0f, r,     b - f,        c);   // sağ alt
     }
 }
 
