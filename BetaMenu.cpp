@@ -439,45 +439,37 @@ static void TryInstallRectHook() {
     if (tried || ++frames < 120) return;
     tried = true;
     g_origRect = (DrawRectFn)(uintptr_t)BM_ADDR_DRAWRECT;
-    unsigned char* base = (unsigned char*)(uintptr_t)BM_ADDR_DRAWHELPTEXT;
-    // Bir adresten başlayıp "jmp rel32" (E9) zincirini takip eder; zincirdeki adresleri yazar.
-    auto chain = [](uintptr_t a, uintptr_t* out) {
-        int n = 0; out[n++] = a;
-        for (int h = 0; h < 3; ++h) {
-            const unsigned char* p = (const unsigned char*)a;
-            if (p[0] != 0xE9) break;
-            a = (uintptr_t)(p + 5) + (uintptr_t)*(int*)(p + 1);
-            out[n++] = a;
+    // Sadece exe kod bölgesindeki adresler okunur (yanlış eşleşen bayt dizilerinde çökmemek için).
+    auto inExe = [](uintptr_t a) { return a >= 0x401000 && a < 0x860000; };
+    int found = 0;
+    // fn'in ilk len baytında "call DrawRect" olan yerleri yamalar; bulunan çağrıların hedeflerini out'a ekler.
+    auto scan = [&](uintptr_t fn, int len, uintptr_t* callees, int& nCallees, int maxCallees) {
+        unsigned char* base = (unsigned char*)fn;
+        for (int i = (fn == (uintptr_t)BM_ADDR_DRAWHELPTEXT ? 5 : 0); i < len; ++i) {
+            if (base[i] != 0xE8) continue;
+            uintptr_t target = (uintptr_t)(base + i + 5) + (uintptr_t)*(int*)(base + i + 1);
+            if (target == (uintptr_t)BM_ADDR_DRAWRECT) {
+                DWORD old = 0;
+                if (!VirtualProtect(base + i + 1, 4, PAGE_EXECUTE_READWRITE, &old)) continue;
+                *(int*)(base + i + 1) = (int)((uintptr_t)&HookedDrawRect - (uintptr_t)(base + i + 5));
+                VirtualProtect(base + i + 1, 4, old, &old);
+                FlushInstructionCache(GetCurrentProcess(), base + i, 5);
+                ++found;
+                FILE* fl = OpenLogAppend();
+                if (fl) { fprintf(fl, "helpframe: call yamalandi: fn %08X +0x%X\n", (unsigned)fn, i); fclose(fl); }
+            } else if (callees && inExe(target) && nCallees < maxCallees) {
+                bool dup = false;
+                for (int k = 0; k < nCallees; ++k) if (callees[k] == target) dup = true;
+                if (!dup) callees[nCallees++] = target;
+            }
         }
-        return n;
     };
-    uintptr_t rectChain[4]; int rn = chain((uintptr_t)BM_ADDR_DRAWRECT, rectChain);
-    int found = 0, listed = 0;
-    for (int i = 5; i < 0x1000; ++i) {
-        if (base[i] != 0xE8) continue;
-        int rel = *(int*)(base + i + 1);
-        uintptr_t target = (uintptr_t)(base + i + 5) + (uintptr_t)rel;
-        if (target < 0x401000 || target > 0x860000) {   // exe kod bölgesi dışı: başka modun yaması olabilir
-            if (target < 0x10000) continue;
-        }
-        uintptr_t tc[4]; int tn = chain(target, tc);
-        bool match = false;
-        for (int x = 0; x < tn && !match; ++x) for (int y = 0; y < rn; ++y) if (tc[x] == rectChain[y]) match = true;
-        if (listed < 40) {
-            ++listed;
-            FILE* fl = OpenLogAppend();
-            if (fl) { fprintf(fl, "helpframe: call @+0x%X -> %08X %s\n", i, (unsigned)target, match ? "(DrawRect)" : ""); fclose(fl); }
-        }
-        if (!match) continue;
-        DWORD old = 0;
-        if (!VirtualProtect(base + i + 1, 4, PAGE_EXECUTE_READWRITE, &old)) continue;
-        *(int*)(base + i + 1) = (int)((uintptr_t)&HookedDrawRect - (uintptr_t)(base + i + 5));
-        VirtualProtect(base + i + 1, 4, old, &old);
-        FlushInstructionCache(GetCurrentProcess(), base + i, 5);
-        ++found;
-    }
+    uintptr_t callees[128]; int nCallees = 0;
+    scan((uintptr_t)BM_ADDR_DRAWHELPTEXT, 0x1000, callees, nCallees, 128);
+    int level1 = nCallees;
+    for (int k = 0; k < level1; ++k) scan(callees[k], 0x400, nullptr, nCallees, 0);
     FILE* f = OpenLogAppend();
-    if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (0 ise cerceve cikmaz)\n", found); fclose(f); }
+    if (f) { fprintf(f, "helpframe: DrawRect cagri yeri sayisi = %d (alt fonksiyon sayisi %d; 0 ise cerceve cikmaz)\n", found, level1); fclose(f); }
 }
 
 static void __cdecl HookedDrawHelpText() {
