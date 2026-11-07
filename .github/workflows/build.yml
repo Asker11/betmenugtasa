@@ -79,7 +79,7 @@ jobs:
             $m = $hdrs | Select-String -Pattern $pair[0] | Select-Object -First 1
             if ($m -and $m.Line -match '0x([0-9A-Fa-f]{6,8})') {
               Write-Host "Adres bulundu $($pair[1]) = 0x$($Matches[1])"
-              $defs += "/D$($pair[1])=0x$($Matches[1])"
+              # yalnizca bilgi icin yazdiriliyor, otomatik uygulanmiyor
             } else { Write-Host "Adres bulunamadi: $($pair[1]) (varsayilan kullanilacak)" }
           }
 
